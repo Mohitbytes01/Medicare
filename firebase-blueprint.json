@@ -1,0 +1,137 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Private patient or caregiver profile isolated per user.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the owner.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "description": "Full name of the patient or caregiver.",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "email": {
+          "type": "string",
+          "description": "Verified email address of the user.",
+          "minLength": 3,
+          "maxLength": 254
+        },
+        "phone": {
+          "type": "string",
+          "description": "Phone number for WhatsApp and SMS reminders.",
+          "minLength": 0,
+          "maxLength": 32
+        },
+        "preferredLanguage": {
+          "type": "string",
+          "description": "Preferred regional language for dosage instructions.",
+          "enum": ["en", "bn", "hi"],
+          "minLength": 2,
+          "maxLength": 2
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the profile was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the profile was updated."
+        }
+      },
+      "required": ["uid", "name", "email", "preferredLanguage", "createdAt", "updatedAt"]
+    },
+    "SavedPrescription": {
+      "title": "SavedPrescription",
+      "description": "Verified prescription schedule saved under a user's private collection.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "UID of the user who owns this prescription record.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "verificationId": {
+          "type": "string",
+          "description": "Unique verification ID.",
+          "minLength": 3,
+          "maxLength": 64
+        },
+        "patientName": {
+          "type": "string",
+          "description": "Patient name extracted from the prescription.",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "doctorName": {
+          "type": "string",
+          "description": "Doctor name extracted from the prescription.",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "prescriptionDate": {
+          "type": "string",
+          "description": "Date of prescription.",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "overallSafetyStatus": {
+          "type": "string",
+          "description": "Overall drug interaction risk status.",
+          "enum": ["SAFE", "CAUTION", "HIGH_RISK"],
+          "minLength": 4,
+          "maxLength": 16
+        },
+        "medicineCount": {
+          "type": "integer",
+          "description": "Count of extracted medicines."
+        },
+        "smartSplitCartTotal": {
+          "type": "number",
+          "description": "Lowest total price across online pharmacies in INR."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when saved."
+        }
+      },
+      "required": [
+        "ownerId",
+        "verificationId",
+        "patientName",
+        "doctorName",
+        "prescriptionDate",
+        "overallSafetyStatus",
+        "medicineCount",
+        "smartSplitCartTotal",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/private/{docId}": {
+      "schema": {
+        "$ref": "#/entities/UserProfile"
+      },
+      "description": "Isolated private PII profile document (docId == 'profile') strictly accessible only by the owner."
+    },
+    "/users/{userId}/prescriptions/{prescriptionId}": {
+      "schema": {
+        "$ref": "#/entities/SavedPrescription"
+      },
+      "description": "User's private saved prescription verification records."
+    }
+  }
+}

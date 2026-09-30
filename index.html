@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <script>
+      (function () {
+        try {
+          var currentFetch = typeof window.fetch === 'function' ? window.fetch.bind(window) : undefined;
+          if (currentFetch) {
+            try {
+              Object.defineProperty(window, 'fetch', {
+                get: function () {
+                  return currentFetch;
+                },
+                set: function (fn) {
+                  currentFetch = fn;
+                },
+                configurable: true,
+              });
+            } catch (_e) {}
+            if (window.Window && window.Window.prototype) {
+              try {
+                Object.defineProperty(window.Window.prototype, 'fetch', {
+                  get: function () {
+                    return currentFetch;
+                  },
+                  set: function (fn) {
+                    currentFetch = fn;
+                  },
+                  configurable: true,
+                });
+              } catch (_e2) {}
+            }
+          }
+        } catch (_err) {}
+      })();
+    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Medi-Verify AI — Clinical Prescription & Price Auditor</title>
+    <meta name="description" content="Multimodal prescription verifier, drug interaction safety auditor, trilingual dosage translator (English, Bengali, Hindi), and real-time Indian online pharmacy price aggregator." />
+    <meta property="og:title" content="Medi-Verify AI — Clinical Prescription & Price Auditor" />
+    <meta property="og:description" content="Multimodal prescription verifier, drug interaction safety auditor, trilingual dosage translator (English, Bengali, Hindi), and real-time Indian online pharmacy price aggregator." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content="#0F172A" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="MediVerify" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Noto+Sans+Bengali:wght@400;600&family=Noto+Sans+Devanagari:wght@400;600&family=Plus+Jakarta+Sans:wght@400;600;700&display=swap" rel="stylesheet" />
+  </head>
+  <body class="bg-[#F8FAFC] text-slate-900 antialiased selection:bg-teal-700 selection:text-white">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

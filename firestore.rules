@@ -1,0 +1,169 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net: Default-Deny Catch-All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Hardened Global Primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // 3. Entity Validation Blueprints (Verbatim constraints from firebase-blueprint.json)
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'name', 'email', 'preferredLanguage', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'name', 'email', 'phone', 'preferredLanguage', 'createdAt', 'updatedAt'])
+        && data.uid is string
+        && data.uid.size() >= 1
+        && data.uid.size() <= 128
+        && data.uid.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.uid == request.auth.uid
+        && data.name is string
+        && data.name.size() >= 1
+        && data.name.size() <= 120
+        && data.email is string
+        && data.email.size() >= 3
+        && data.email.size() <= 254
+        && (!('phone' in data) || (data.phone is string && data.phone.size() <= 32))
+        && data.preferredLanguage is string
+        && data.preferredLanguage.size() == 2
+        && (data.preferredLanguage == 'en' || data.preferredLanguage == 'bn' || data.preferredLanguage == 'hi')
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidSavedPrescription(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'verificationId',
+          'patientName',
+          'doctorName',
+          'prescriptionDate',
+          'overallSafetyStatus',
+          'medicineCount',
+          'smartSplitCartTotal',
+          'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId',
+          'verificationId',
+          'patientName',
+          'doctorName',
+          'prescriptionDate',
+          'overallSafetyStatus',
+          'medicineCount',
+          'smartSplitCartTotal',
+          'createdAt'
+        ])
+        && data.ownerId is string
+        && data.ownerId.size() >= 1
+        && data.ownerId.size() <= 128
+        && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.ownerId == request.auth.uid
+        && data.verificationId is string
+        && data.verificationId.size() >= 3
+        && data.verificationId.size() <= 64
+        && data.patientName is string
+        && data.patientName.size() >= 1
+        && data.patientName.size() <= 120
+        && data.doctorName is string
+        && data.doctorName.size() >= 1
+        && data.doctorName.size() <= 120
+        && data.prescriptionDate is string
+        && data.prescriptionDate.size() >= 1
+        && data.prescriptionDate.size() <= 40
+        && data.overallSafetyStatus is string
+        && data.overallSafetyStatus.size() >= 4
+        && data.overallSafetyStatus.size() <= 16
+        && (data.overallSafetyStatus == 'SAFE' || data.overallSafetyStatus == 'CAUTION' || data.overallSafetyStatus == 'HIGH_RISK')
+        && data.medicineCount is int
+        && data.medicineCount >= 0
+        && data.medicineCount <= 50
+        && data.smartSplitCartTotal is number
+        && data.smartSplitCartTotal >= 0
+        && data.createdAt is timestamp;
+    }
+
+    // 4. Isolated Private User Profile Collection (/users/{userId}/private/{docId})
+    match /users/{userId}/private/{docId} {
+      allow get: if isVerifiedUser()
+        && isValidId(userId)
+        && isValidId(docId)
+        && docId == 'profile'
+        && request.auth.uid == userId;
+
+      allow create: if isVerifiedUser()
+        && isValidId(userId)
+        && isValidId(docId)
+        && docId == 'profile'
+        && request.auth.uid == userId
+        && isValidUserProfile(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidUserProfile(incoming())
+        && isValidId(userId)
+        && isValidId(docId)
+        && docId == 'profile'
+        && request.auth.uid == userId
+        && incoming().uid == existing().uid
+        && incoming().email == existing().email
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'preferredLanguage', 'updatedAt']);
+
+      allow delete: if false;
+    }
+
+    // 5. User Private Saved Prescriptions Subcollection (/users/{userId}/prescriptions/{prescriptionId})
+    match /users/{userId}/prescriptions/{prescriptionId} {
+      allow get: if isVerifiedUser()
+        && isValidId(userId)
+        && isValidId(prescriptionId)
+        && request.auth.uid == userId
+        && existing().ownerId == request.auth.uid
+        && exists(/databases/$(database)/documents/users/$(userId)/private/profile);
+
+      allow list: if isVerifiedUser()
+        && request.auth.uid == userId
+        && existing().ownerId == request.auth.uid;
+
+      allow create: if isVerifiedUser()
+        && isValidId(userId)
+        && isValidId(prescriptionId)
+        && request.auth.uid == userId
+        && isValidSavedPrescription(incoming())
+        && incoming().createdAt == request.time
+        && exists(/databases/$(database)/documents/users/$(userId)/private/profile);
+
+      allow update: if false;
+
+      allow delete: if isVerifiedUser()
+        && isValidId(userId)
+        && isValidId(prescriptionId)
+        && request.auth.uid == userId
+        && existing().ownerId == request.auth.uid
+        && exists(/databases/$(database)/documents/users/$(userId)/private/profile);
+    }
+  }
+}
