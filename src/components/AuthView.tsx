@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Eye, EyeOff, Loader2, LogIn, UserPlus, CheckCircle2 } from 'lucide-react';
 import { AuthUser, SupportedLanguage } from '../types/prescription';
 import { signInWithGoogle } from '../firebase';
+import { VeriMedLogo } from './VeriMedLogo';
 
 interface AuthViewProps {
   initialMode?: 'signin' | 'register';
@@ -91,8 +92,11 @@ export const AuthView: React.FC<AuthViewProps> = ({
       {/* Left Column: Simple Welcome & App Benefits */}
       <div className="lg:col-span-6 space-y-6 pt-2">
         <div>
+          <div className="mb-3">
+            <VeriMedLogo variant="horizontal" size="lg" />
+          </div>
           <p className="text-xs font-semibold text-teal-700">
-            Medi-Verify AI · Patient &amp; Family Portal
+            VeriMed · Patient &amp; Family Portal
           </p>
           <h1 className="mt-1.5 text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">
             Read Doctor Prescriptions &amp; Find Lowest Medicine Prices
@@ -344,7 +348,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
                   ? 'Signing In...'
                   : 'Creating Account...'
                 : mode === 'signin'
-                  ? 'Sign In to Medi-Verify AI'
+                  ? 'Sign In to VeriMed'
                   : 'Register & Open App'}
             </span>
           </button>

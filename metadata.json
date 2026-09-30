@@ -1,5 +1,5 @@
 {
-  "name": "Medi-Verify AI",
+  "name": "VeriMed",
   "description": "Multimodal prescription verifier, drug interaction safety auditor, trilingual dosage translator (English, Bengali, Hindi), and real-time Indian online pharmacy price aggregator.",
   "requestFramePermissions": ["camera"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

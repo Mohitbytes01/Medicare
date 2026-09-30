@@ -3,11 +3,16 @@ import {
   Check,
   CheckCircle2,
   ClipboardCheck,
+  Copy,
+  Download,
   ExternalLink,
-  PackageCheck,
+  MessageSquare,
+  Minus,
+  Plus,
   Search,
   ShoppingBag,
   ShoppingCart,
+  Truck,
 } from 'lucide-react';
 import { PrescriptionVerificationResult } from '../types/prescription';
 
@@ -17,44 +22,62 @@ interface PharmacyAggregatorViewProps {
 
 type PlatformId = '1mg' | 'pharmeasy' | 'netmeds' | 'apollo';
 
+function cleanMedicineQueryName(rawName: string): string {
+  const cleaned = rawName
+    .replace(/\([^)]*\)/g, '')
+    .replace(
+      /^(?:tab(?:let)?s?|cap(?:sule)?s?|syp|syrup|inj(?:ection)?|oint(?:ment)?|drops?|gel|cream)\.?\s+/i,
+      ''
+    )
+    .replace(/[^a-zA-Z0-9\s-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned || rawName.trim();
+}
+
 const PLATFORMS: Array<{
   id: PlatformId;
   name: 'Tata 1mg' | 'PharmEasy' | 'Netmeds' | 'Apollo 24|7';
   deliveryNote: string;
   homeUrl: string;
-  buildBulkOrderUrl: (medicineNames: string[]) => string;
+  prescriptionUploadUrl: string;
+  buildSingleMedUrl: (medName: string) => string;
 }> = [
   {
     id: '1mg',
     name: 'Tata 1mg',
     deliveryNote: 'Standard 1-day home delivery',
     homeUrl: 'https://www.1mg.com',
-    buildBulkOrderUrl: (names) =>
-      `https://www.1mg.com/search/all?name=${encodeURIComponent(names.join(', '))}`,
+    prescriptionUploadUrl: 'https://www.1mg.com',
+    buildSingleMedUrl: (name) =>
+      `https://www.1mg.com/search/all?name=${encodeURIComponent(cleanMedicineQueryName(name))}`,
   },
   {
     id: 'pharmeasy',
     name: 'PharmEasy',
     deliveryNote: 'Standard 24–48 hr delivery',
     homeUrl: 'https://pharmeasy.in',
-    buildBulkOrderUrl: (names) =>
-      `https://pharmeasy.in/search/all?name=${encodeURIComponent(names.join(', '))}`,
+    prescriptionUploadUrl: 'https://pharmeasy.in/online-medicine-order',
+    buildSingleMedUrl: (name) =>
+      `https://pharmeasy.in/search/all?name=${encodeURIComponent(cleanMedicineQueryName(name))}`,
   },
   {
     id: 'netmeds',
     name: 'Netmeds',
     deliveryNote: 'Pan-India courier delivery',
     homeUrl: 'https://www.netmeds.com',
-    buildBulkOrderUrl: (names) =>
-      `https://www.netmeds.com/catalogsearch/result/${encodeURIComponent(names.join(' '))}/all`,
+    prescriptionUploadUrl: 'https://www.netmeds.com/prescriptions',
+    buildSingleMedUrl: (name) =>
+      `https://www.netmeds.com/products?q=${encodeURIComponent(cleanMedicineQueryName(name))}`,
   },
   {
     id: 'apollo',
     name: 'Apollo 24|7',
     deliveryNote: 'Express 2-hour local pharmacy delivery',
     homeUrl: 'https://www.apollopharmacy.in',
-    buildBulkOrderUrl: (names) =>
-      `https://www.apollopharmacy.in/search-medicines/${encodeURIComponent(names.join(' '))}`,
+    prescriptionUploadUrl: 'https://www.apollopharmacy.in/upload-prescription',
+    buildSingleMedUrl: (name) =>
+      `https://www.apollopharmacy.in/search-medicines/${encodeURIComponent(cleanMedicineQueryName(name))}`,
   },
 ];
 
@@ -62,17 +85,42 @@ export const PharmacyAggregatorView: React.FC<PharmacyAggregatorViewProps> = ({
   result,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
+  const [quantities, setQuantities] = useState<Record<string, number>>(() => {
+    const init: Record<string, number> = {};
+    result.medicines.forEach((m) => {
+      init[m.id] = 1;
+    });
+    return init;
+  });
 
-  // Compute total bill for all medicines per pharmacy source
+  const getQty = (medId: string) => quantities[medId] ?? 1;
+
+  const updateQty = (medId: string, delta: number) => {
+    setQuantities((prev) => {
+      const current = prev[medId] ?? 1;
+      const next = Math.max(1, Math.min(10, current + delta));
+      return { ...prev, [medId]: next };
+    });
+  };
+
+  // Compute total bill for all medicines per pharmacy source (accounting for strip quantities)
   const totalMrp = Number(
     result.medicines
-      .reduce((sum, med) => sum + (med.pharmacyQuotes[0]?.mrp || 0), 0)
+      .reduce(
+        (sum, med) =>
+          sum + (med.pharmacyQuotes[0]?.mrp || 0) * getQty(med.id),
+        0
+      )
       .toFixed(2)
   );
 
   const totalJanAushadhi = Number(
     result.medicines
-      .reduce((sum, med) => sum + (med.janAushadhiGenericPrice || 0), 0)
+      .reduce(
+        (sum, med) =>
+          sum + (med.janAushadhiGenericPrice || 0) * getQty(med.id),
+        0
+      )
       .toFixed(2)
   );
 
@@ -81,10 +129,13 @@ export const PharmacyAggregatorView: React.FC<PharmacyAggregatorViewProps> = ({
     const items: Array<{
       medId: string;
       medName: string;
+      cleanQuery: string;
       genericComposition: string;
       packSize: string;
+      quantity: number;
       mrp: number;
-      price: number;
+      unitPrice: number;
+      lineTotal: number;
       discountPercent: number;
       deepLink: string;
     }> = [];
@@ -93,18 +144,24 @@ export const PharmacyAggregatorView: React.FC<PharmacyAggregatorViewProps> = ({
       const quote =
         med.pharmacyQuotes.find((q) => q.platformId === platform.id) ||
         med.pharmacyQuotes[0];
-      const price = quote ? quote.discountedPrice : 0;
-      const mrp = quote ? quote.mrp : 0;
-      totalBill += price;
+      const qty = getQty(med.id);
+      const unitPrice = quote ? quote.discountedPrice : 0;
+      const unitMrp = quote ? quote.mrp : 0;
+      const lineTotal = Number((unitPrice * qty).toFixed(2));
+      totalBill += lineTotal;
+
       items.push({
         medId: med.id,
         medName: med.name,
+        cleanQuery: cleanMedicineQueryName(med.name),
         genericComposition: med.genericComposition,
         packSize: quote?.packSize || '1 Strip',
-        mrp,
-        price,
+        quantity: qty,
+        mrp: Number((unitMrp * qty).toFixed(2)),
+        unitPrice,
+        lineTotal,
         discountPercent: quote?.discountPercent || 0,
-        deepLink: quote?.deepLink || platform.homeUrl,
+        deepLink: platform.buildSingleMedUrl(med.name),
       });
     });
 
@@ -113,15 +170,17 @@ export const PharmacyAggregatorView: React.FC<PharmacyAggregatorViewProps> = ({
     const savedPercent =
       totalMrp > 0 ? Math.round((totalSaved / totalMrp) * 100) : 0;
 
+    // Primary external checkout URL opens the first medicine directly on the live pharmacy site
+    const primaryCheckoutUrl =
+      items.length > 0 ? items[0].deepLink : platform.homeUrl;
+
     return {
       ...platform,
       totalBill: cleanTotal,
       totalSaved,
       savedPercent,
       items,
-      bulkOrderUrl: platform.buildBulkOrderUrl(
-        result.medicines.map((m) => m.name)
-      ),
+      primaryCheckoutUrl,
     };
   });
 
@@ -136,32 +195,23 @@ export const PharmacyAggregatorView: React.FC<PharmacyAggregatorViewProps> = ({
   const [bulkAddedStoreId, setBulkAddedStoreId] = useState<PlatformId | null>(
     null
   );
-  const [orderConfirmedStoreId, setOrderConfirmedStoreId] =
-    useState<PlatformId | null>(null);
   const [copiedBundle, setCopiedBundle] = useState(false);
 
   const activeStore =
     storeTotals.find((s) => s.id === selectedStoreId) || bestStore;
 
   const isAllAddedForActiveStore = bulkAddedStoreId === activeStore.id;
-  const isOrderConfirmedForActiveStore =
-    orderConfirmedStoreId === activeStore.id;
 
-  const handleAddAllMedicinesAtOnce = (storeId: PlatformId) => {
-    setSelectedStoreId(storeId);
-    setBulkAddedStoreId(storeId);
-    setOrderConfirmedStoreId(null);
-
-    // Also copy the complete prescription medicine list to clipboard for 1-paste convenience
+  const copyStoreMedicineList = (storeId: PlatformId) => {
     const targetStore =
       storeTotals.find((s) => s.id === storeId) || activeStore;
     const summaryText = [
-      `Full Prescription Order (${targetStore.name})`,
+      `VeriMed Prescription Shopping List (${targetStore.name})`,
       ...targetStore.items.map(
         (item, idx) =>
-          `${idx + 1}. ${item.medName} (${item.packSize}) - ₹${item.price.toFixed(2)}`
+          `${idx + 1}. ${item.cleanQuery} (${item.quantity}x ${item.packSize}) - ₹${item.lineTotal.toFixed(2)}`
       ),
-      `Total Bill: ₹${targetStore.totalBill.toFixed(2)} (Saved ₹${targetStore.totalSaved.toFixed(2)})`,
+      `Estimated Total on ${targetStore.name}: ₹${targetStore.totalBill.toFixed(2)} (Save ₹${targetStore.totalSaved.toFixed(2)})`,
     ].join('\n');
 
     if (typeof navigator !== 'undefined' && navigator.clipboard) {
@@ -169,15 +219,52 @@ export const PharmacyAggregatorView: React.FC<PharmacyAggregatorViewProps> = ({
         .writeText(summaryText)
         .then(() => {
           setCopiedBundle(true);
-          setTimeout(() => setCopiedBundle(false), 3500);
+          setTimeout(() => setCopiedBundle(false), 4000);
         })
         .catch(() => {});
     }
+  };
+
+  const handleSelectBundleStore = (storeId: PlatformId) => {
+    setSelectedStoreId(storeId);
+    setBulkAddedStoreId(storeId);
+    copyStoreMedicineList(storeId);
 
     const cartSection = document.getElementById('one-click-bulk-cart');
     if (cartSection) {
       cartSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
+  };
+
+  const handleDownloadShoppingList = () => {
+    const lines = [
+      `VERIMED HEALTH — PRESCRIPTION SHOPPING LIST`,
+      `=================================================`,
+      `Selected Pharmacy: ${activeStore.name} (${activeStore.homeUrl})`,
+      `Patient Name:      ${result.patientName}`,
+      `Prescribed By:     ${result.doctorName}`,
+      `Date:              ${result.prescriptionDate}`,
+      `-------------------------------------------------`,
+      `MEDICINES TO ORDER (${activeStore.items.length} Items):`,
+      ...activeStore.items.map(
+        (item, idx) =>
+          `${idx + 1}. ${item.medName} — ${item.quantity}x (${item.packSize}) @ ₹${item.unitPrice.toFixed(2)} = ₹${item.lineTotal.toFixed(2)}\n   Order Link: ${item.deepLink}`
+      ),
+      `-------------------------------------------------`,
+      `Printed Shop MRP Total: ₹${totalMrp.toFixed(2)}`,
+      `Total Discount Saved:  -₹${activeStore.totalSaved.toFixed(2)}`,
+      `ESTIMATED BILL TOTAL:   ₹${activeStore.totalBill.toFixed(2)}`,
+      `=================================================`,
+    ];
+    const blob = new Blob([lines.join('\n')], {
+      type: 'text/plain;charset=utf-8;',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `VeriMed_${activeStore.name.replace(/\s+/g, '_')}_List.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const filteredMedicines = result.medicines.filter(
@@ -188,7 +275,7 @@ export const PharmacyAggregatorView: React.FC<PharmacyAggregatorViewProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Section 1: Total Bill Comparison + 1-Button "Add All Medicines at Once" */}
+      {/* Section 1: Total Bill Comparison + Direct External Pharmacy Checkout */}
       <section className="bg-white border border-slate-200 rounded-2xl p-6 space-y-5">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-5 border-b border-slate-200">
           <div>
@@ -199,12 +286,12 @@ export const PharmacyAggregatorView: React.FC<PharmacyAggregatorViewProps> = ({
               Total Prescription Bill From Each Online Pharmacy
             </h1>
             <p className="mt-1 text-xs text-slate-600">
-              Compare the <strong className="text-slate-900">complete bill total</strong> across all 4 sources and use{' '}
-              <strong className="text-slate-900">one button to add all {result.medicines.length} medicines at once</strong> from a single store.
+              Compare the <strong className="text-slate-900">complete bill total</strong> across Tata 1mg, PharmEasy, Netmeds, and Apollo 24|7 and open the{' '}
+              <strong className="text-slate-900">official pharmacy website in a new tab</strong> to order your medicines.
             </p>
           </div>
 
-          {/* Best Single-Store Recommendation + 1-Button Add All */}
+          {/* Best Single-Store Recommendation + Direct External Redirect Link */}
           <div className="p-4 rounded-xl bg-teal-50/80 border border-teal-200 shrink-0 flex flex-col sm:flex-row sm:items-center gap-4">
             <div>
               <div className="text-xs font-semibold text-teal-800">
@@ -223,18 +310,17 @@ export const PharmacyAggregatorView: React.FC<PharmacyAggregatorViewProps> = ({
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={() => handleAddAllMedicinesAtOnce(bestStore.id)}
+            <a
+              href={bestStore.primaryCheckoutUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => handleSelectBundleStore(bestStore.id)}
               className="min-h-[42px] px-4 py-2.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold inline-flex items-center justify-center gap-2 transition-colors whitespace-nowrap cursor-pointer shadow-xs"
             >
               <ShoppingCart className="w-4 h-4 shrink-0" />
-              <span>
-                {bulkAddedStoreId === bestStore.id
-                  ? `All ${result.medicines.length} Medicines Added ✓`
-                  : `Add All ${result.medicines.length} Medicines at Once`}
-              </span>
-            </button>
+              <span>Order on {bestStore.name}</span>
+              <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+            </a>
           </div>
         </div>
 
@@ -243,7 +329,6 @@ export const PharmacyAggregatorView: React.FC<PharmacyAggregatorViewProps> = ({
           {storeTotals.map((store) => {
             const isCheapestOverall = store.id === bestStore.id;
             const isSelected = store.id === activeStore.id;
-            const isBulkAdded = bulkAddedStoreId === store.id;
             const diffFromBest = Number(
               (store.totalBill - bestStore.totalBill).toFixed(2)
             );
@@ -298,32 +383,24 @@ export const PharmacyAggregatorView: React.FC<PharmacyAggregatorViewProps> = ({
                     </div>
                   </div>
 
-                  <button
-                    type="button"
+                  <a
+                    href={store.primaryCheckoutUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleAddAllMedicinesAtOnce(store.id);
+                      handleSelectBundleStore(store.id);
                     }}
                     className={`min-h-[42px] px-4 py-2 rounded-xl text-xs font-bold inline-flex items-center gap-2 transition-colors whitespace-nowrap cursor-pointer ${
-                      isBulkAdded
-                        ? 'bg-emerald-700 text-white'
-                        : isCheapestOverall
-                          ? 'bg-teal-700 hover:bg-teal-800 text-white'
-                          : 'bg-slate-900 hover:bg-slate-800 text-white'
+                      isCheapestOverall
+                        ? 'bg-teal-700 hover:bg-teal-800 text-white'
+                        : 'bg-slate-900 hover:bg-slate-800 text-white'
                     }`}
                   >
-                    {isBulkAdded ? (
-                      <>
-                        <Check className="w-4 h-4 shrink-0" />
-                        <span>All {result.medicines.length} Added ({store.name})</span>
-                      </>
-                    ) : (
-                      <>
-                        <ShoppingCart className="w-4 h-4 shrink-0" />
-                        <span>Add All {result.medicines.length} Medicines</span>
-                      </>
-                    )}
-                  </button>
+                    <ShoppingCart className="w-4 h-4 shrink-0" />
+                    <span>Buy on {store.name}</span>
+                    <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                  </a>
                 </div>
               </div>
             );
@@ -353,7 +430,7 @@ export const PharmacyAggregatorView: React.FC<PharmacyAggregatorViewProps> = ({
               Side-by-Side Bill Breakdown Across All 4 Sources
             </h2>
             <p className="mt-0.5 text-xs text-slate-500">
-              Compare every medicine price and see the final total bill at the bottom of each column
+              Click any price cell to open that medicine directly on the pharmacy website
             </p>
           </div>
 
@@ -397,7 +474,8 @@ export const PharmacyAggregatorView: React.FC<PharmacyAggregatorViewProps> = ({
 
             <tbody className="divide-y divide-slate-200 text-sm">
               {filteredMedicines.map((med, idx) => {
-                const mrp = med.pharmacyQuotes[0]?.mrp || 0;
+                const qty = getQty(med.id);
+                const mrp = (med.pharmacyQuotes[0]?.mrp || 0) * qty;
                 const packSize = med.pharmacyQuotes[0]?.packSize || '1 Strip';
 
                 return (
@@ -407,7 +485,7 @@ export const PharmacyAggregatorView: React.FC<PharmacyAggregatorViewProps> = ({
                         {idx + 1}. {med.name}
                       </div>
                       <div className="text-xs text-slate-500">
-                        {med.genericComposition} · {packSize}
+                        {med.genericComposition} · {qty}x ({packSize})
                       </div>
                     </td>
 
@@ -419,7 +497,8 @@ export const PharmacyAggregatorView: React.FC<PharmacyAggregatorViewProps> = ({
                       const q = med.pharmacyQuotes.find(
                         (quote) => quote.platformId === store.id
                       );
-                      const price = q ? q.discountedPrice : mrp;
+                      const price = (q ? q.discountedPrice : mrp) * qty;
+                      const medUrl = store.buildSingleMedUrl(med.name);
                       return (
                         <td
                           key={store.id}
@@ -429,7 +508,16 @@ export const PharmacyAggregatorView: React.FC<PharmacyAggregatorViewProps> = ({
                               : 'text-slate-700'
                           }`}
                         >
-                          ₹{price.toFixed(2)}
+                          <a
+                            href={medUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center justify-end gap-1 hover:text-teal-700 hover:underline"
+                            title={`Open ${med.name} on ${store.name}`}
+                          >
+                            <span>₹{price.toFixed(2)}</span>
+                            <ExternalLink className="w-3 h-3 text-slate-400" />
+                          </a>
                         </td>
                       );
                     })}
@@ -438,13 +526,13 @@ export const PharmacyAggregatorView: React.FC<PharmacyAggregatorViewProps> = ({
               })}
             </tbody>
 
-            {/* Total Bill Footer Row with 1-Click Add All per Column */}
+            {/* Total Bill Footer Row with Direct External Link per Column */}
             <tfoot>
               <tr className="border-t-2 border-slate-300 bg-slate-50 font-bold text-sm">
                 <td className="py-4 px-3 text-slate-900">
                   <div>Total Bill ({result.medicines.length} Medicines)</div>
                   <div className="text-xs font-normal text-slate-500">
-                    Add all medicines in 1 click from your preferred source
+                    Opens the pharmacy site in a new tab &amp; copies your list
                   </div>
                 </td>
 
@@ -454,7 +542,6 @@ export const PharmacyAggregatorView: React.FC<PharmacyAggregatorViewProps> = ({
 
                 {storeTotals.map((store) => {
                   const isCheapest = store.id === bestStore.id;
-                  const isBulkAdded = bulkAddedStoreId === store.id;
                   return (
                     <td
                       key={store.id}
@@ -470,20 +557,20 @@ export const PharmacyAggregatorView: React.FC<PharmacyAggregatorViewProps> = ({
                       <div className="text-[11px] font-semibold text-emerald-700 mb-2">
                         Save ₹{store.totalSaved.toFixed(2)}
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => handleAddAllMedicinesAtOnce(store.id)}
+                      <a
+                        href={store.primaryCheckoutUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={() => handleSelectBundleStore(store.id)}
                         className={`min-h-[34px] px-2.5 py-1 rounded-lg font-sans text-[11px] font-bold inline-flex items-center gap-1 transition-colors cursor-pointer ${
-                          isBulkAdded
-                            ? 'bg-emerald-700 text-white'
-                            : isCheapest
-                              ? 'bg-teal-700 hover:bg-teal-800 text-white'
-                              : 'bg-slate-900 hover:bg-slate-800 text-white'
+                          isCheapest
+                            ? 'bg-teal-700 hover:bg-teal-800 text-white'
+                            : 'bg-slate-900 hover:bg-slate-800 text-white'
                         }`}
                       >
-                        <ShoppingCart className="w-3 h-3 shrink-0" />
-                        <span>{isBulkAdded ? 'All Added ✓' : 'Add All'}</span>
-                      </button>
+                        <span>Order on {store.name}</span>
+                        <ExternalLink className="w-3 h-3 shrink-0" />
+                      </a>
                     </td>
                   );
                 })}
@@ -493,7 +580,7 @@ export const PharmacyAggregatorView: React.FC<PharmacyAggregatorViewProps> = ({
         </div>
       </section>
 
-      {/* Section 3: Unified One-Button Full Prescription Bundle Cart */}
+      {/* Section 3: External Pharmacy Bundle & Direct Store Links */}
       <section
         id="one-click-bulk-cart"
         className="bg-white border border-slate-200 rounded-2xl p-6 space-y-5"
@@ -503,80 +590,55 @@ export const PharmacyAggregatorView: React.FC<PharmacyAggregatorViewProps> = ({
             <ShoppingBag className="w-5 h-5 text-teal-700 shrink-0 mt-0.5" />
             <div>
               <h2 className="text-lg font-bold text-slate-900">
-                One-Click Full Prescription Bundle on {activeStore.name}
+                Order Your Full Prescription on {activeStore.name}
               </h2>
               <p className="mt-0.5 text-xs text-slate-600">
-                All <strong className="text-slate-900">{result.medicines.length} prescribed medicines</strong> are bundled together below so you can add and order everything at once instead of clicking items one by one.
+                Open <strong className="text-slate-900">{activeStore.name}</strong> directly in a new tab to add each medicine to your real shopping cart, or upload your prescription photo on {activeStore.name}.
               </p>
             </div>
           </div>
 
-          {/* Single Master Button that Adds All Medicines at Once */}
-          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-            {!isAllAddedForActiveStore ? (
+          {/* Store Quick Switcher */}
+          <div
+            className="flex flex-wrap items-center gap-1 p-1 bg-slate-100 rounded-xl shrink-0"
+            role="group"
+            aria-label="Select pharmacy for checkout"
+          >
+            {storeTotals.map((store) => (
               <button
+                key={store.id}
                 type="button"
-                onClick={() => handleAddAllMedicinesAtOnce(activeStore.id)}
-                className="min-h-[44px] px-5 py-2.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-sm font-bold inline-flex items-center gap-2 transition-colors cursor-pointer shadow-xs"
+                onClick={() => setSelectedStoreId(store.id)}
+                className={`min-h-[36px] px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                  activeStore.id === store.id
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
               >
-                <ShoppingCart className="w-4 h-4 shrink-0" />
-                <span>
-                  Add All {result.medicines.length} Medicines at Once (₹
-                  {activeStore.totalBill.toFixed(2)})
-                </span>
+                {store.name} (₹{store.totalBill.toFixed(0)})
               </button>
-            ) : (
-              <a
-                href={activeStore.bulkOrderUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={() => setOrderConfirmedStoreId(activeStore.id)}
-                className="min-h-[44px] px-5 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold inline-flex items-center gap-2 transition-colors cursor-pointer shadow-xs"
-              >
-                <PackageCheck className="w-4 h-4 shrink-0" />
-                <span>
-                  Checkout All {result.medicines.length} Medicines on {activeStore.name} (₹
-                  {activeStore.totalBill.toFixed(2)})
-                </span>
-                <ExternalLink className="w-4 h-4 shrink-0" />
-              </a>
-            )}
+            ))}
           </div>
         </div>
 
-        {/* Status Banner when User Clicks "Add All Medicines at Once" */}
-        {isAllAddedForActiveStore && (
-          <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        {/* Clipboard Confirmation Banner */}
+        {(isAllAddedForActiveStore || copiedBundle) && (
+          <div className="p-4 rounded-xl bg-teal-50 border border-teal-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-start gap-2.5">
-              <CheckCircle2 className="w-5 h-5 text-emerald-700 shrink-0 mt-0.5" />
-              <div className="text-xs text-emerald-950 space-y-0.5">
+              <ClipboardCheck className="w-5 h-5 text-teal-700 shrink-0 mt-0.5" />
+              <div className="text-xs text-teal-950 space-y-0.5">
                 <p className="font-bold text-sm">
-                  All {result.medicines.length} medicines added to your {activeStore.name} bundle (Total Bill: ₹{activeStore.totalBill.toFixed(2)})
+                  Medicine list copied to your clipboard for {activeStore.name}!
                 </p>
-                <p className="text-emerald-800">
-                  {copiedBundle ? (
-                    <span className="inline-flex items-center gap-1 font-semibold">
-                      <ClipboardCheck className="w-3.5 h-3.5" />
-                      Full medicine list also copied to your clipboard for instant checkout!
-                    </span>
-                  ) : (
-                    <span>
-                      You save ₹{activeStore.totalSaved.toFixed(2)} ({activeStore.savedPercent}% off MRP) by ordering your entire prescription together from {activeStore.name}.
-                    </span>
-                  )}
+                <p className="text-teal-800">
+                  We opened the first medicine ({activeStore.items[0]?.cleanQuery}) on {activeStore.name}. Click the direct buttons below to open and add any remaining medicines to your {activeStore.name} cart.
                 </p>
               </div>
             </div>
-
-            {isOrderConfirmedForActiveStore && (
-              <span className="text-xs font-bold text-emerald-800 font-mono shrink-0">
-                Bundle Ready on {activeStore.name} ✓
-              </span>
-            )}
           </div>
         )}
 
-        {/* Bundle Item List (No repetitive individual buttons needed—everything is included in the 1-click bundle) */}
+        {/* Bundle Item List with Quantity Controls + Direct External "Add on [Store]" Button */}
         <div className="divide-y divide-slate-200 border-t border-b border-slate-200">
           {activeStore.items.map((item, index) => (
             <div
@@ -584,48 +646,78 @@ export const PharmacyAggregatorView: React.FC<PharmacyAggregatorViewProps> = ({
               className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
             >
               <div className="flex items-start gap-2.5">
-                <CheckCircle2
-                  className={`w-4 h-4 shrink-0 mt-0.5 ${
-                    isAllAddedForActiveStore
-                      ? 'text-emerald-600'
-                      : 'text-teal-700'
-                  }`}
-                />
+                <CheckCircle2 className="w-4 h-4 text-teal-700 shrink-0 mt-0.5" />
                 <div>
                   <div className="text-sm font-bold text-slate-900">
                     {index + 1}. {item.medName}
                   </div>
-                  <div className="text-xs text-slate-500">
-                    {item.genericComposition} · {item.packSize} ·{' '}
-                    <span className="font-medium text-slate-700">
-                      {isAllAddedForActiveStore
-                        ? `Added in ${activeStore.name} bundle`
-                        : `Included in ${activeStore.name} full bill`}
+                  <div className="text-xs text-slate-500 flex flex-wrap items-center gap-1.5">
+                    <span>{item.genericComposition}</span>
+                    <span>·</span>
+                    <span>{item.packSize}</span>
+                    <span>·</span>
+                    <span className="font-mono text-emerald-700 font-semibold">
+                      {item.discountPercent}% off MRP
                     </span>
                   </div>
                 </div>
               </div>
 
-              <div className="flex items-center justify-between sm:justify-end gap-4 pl-6 sm:pl-0">
-                <div className="text-right font-mono tabular-nums">
-                  <span className="text-sm font-bold text-slate-900">
-                    ₹{item.price.toFixed(2)}
-                  </span>{' '}
-                  <span className="text-xs text-slate-400 line-through">
-                    ₹{item.mrp.toFixed(2)}
+              <div className="flex flex-wrap items-center justify-between sm:justify-end gap-3 pl-6 sm:pl-0">
+                {/* Strip Quantity Control */}
+                <div className="inline-flex items-center border border-slate-200 rounded-lg bg-slate-50">
+                  <button
+                    type="button"
+                    onClick={() => updateQty(item.medId, -1)}
+                    className="min-h-[34px] min-w-[34px] flex items-center justify-center text-slate-600 hover:text-slate-900 cursor-pointer"
+                    aria-label={`Decrease strips for ${item.medName}`}
+                  >
+                    <Minus className="w-3.5 h-3.5" />
+                  </button>
+                  <span className="px-2.5 text-xs font-mono font-bold text-slate-900">
+                    {item.quantity} {item.quantity === 1 ? 'Strip' : 'Strips'}
                   </span>
+                  <button
+                    type="button"
+                    onClick={() => updateQty(item.medId, 1)}
+                    className="min-h-[34px] min-w-[34px] flex items-center justify-center text-slate-600 hover:text-slate-900 cursor-pointer"
+                    aria-label={`Increase strips for ${item.medName}`}
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
                 </div>
+
+                <div className="text-right font-mono tabular-nums min-w-[80px]">
+                  <div className="text-sm font-bold text-slate-900">
+                    ₹{item.lineTotal.toFixed(2)}
+                  </div>
+                  <div className="text-xs text-slate-400 line-through">
+                    ₹{item.mrp.toFixed(2)}
+                  </div>
+                </div>
+
+                <a
+                  href={item.deepLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="min-h-[36px] px-3 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
+                >
+                  <span>Buy on {activeStore.name}</span>
+                  <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                </a>
               </div>
             </div>
           ))}
         </div>
 
-        {/* Bottom Summary & Single Action Bar */}
-        <div className="pt-1 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        {/* Bottom Summary & External Pharmacy Actions */}
+        <div className="pt-2 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="space-y-0.5">
-            <div className="text-xs text-slate-500">
-              Combined Bill for All {result.medicines.length} Medicines on{' '}
-              <strong className="text-slate-900">{activeStore.name}</strong>
+            <div className="text-xs text-slate-500 flex items-center gap-1.5">
+              <Truck className="w-3.5 h-3.5 text-teal-700" />
+              <span>
+                Estimated Total on <strong className="text-slate-900">{activeStore.name}</strong> · {activeStore.deliveryNote}
+              </span>
             </div>
             <div className="flex items-baseline gap-2.5">
               <span className="text-2xl font-bold font-mono tabular-nums text-slate-900">
@@ -640,47 +732,81 @@ export const PharmacyAggregatorView: React.FC<PharmacyAggregatorViewProps> = ({
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* Primary Redirect to Selected Pharmacy Store */}
+            <a
+              href={activeStore.primaryCheckoutUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => copyStoreMedicineList(activeStore.id)}
+              className="min-h-[44px] px-5 py-2.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold inline-flex items-center gap-2 transition-colors whitespace-nowrap shadow-xs"
+            >
+              <ShoppingCart className="w-4 h-4 shrink-0" />
+              <span>
+                Open {activeStore.name} &amp; Order (₹{activeStore.totalBill.toFixed(2)})
+              </span>
+              <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+            </a>
+
+            {/* Prescription Upload Page on Selected Pharmacy */}
+            <a
+              href={activeStore.prescriptionUploadUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => copyStoreMedicineList(activeStore.id)}
+              className="min-h-[44px] px-4 py-2.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-100 text-slate-800 text-xs font-bold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
+            >
+              <span>Upload Rx on {activeStore.name}</span>
+              <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+            </a>
+
+            {/* Copy Medicine List */}
             <button
               type="button"
-              onClick={() => handleAddAllMedicinesAtOnce(activeStore.id)}
-              className={`min-h-[44px] px-5 py-2.5 rounded-xl text-sm font-bold inline-flex items-center gap-2 transition-colors cursor-pointer ${
-                isAllAddedForActiveStore
-                  ? 'bg-emerald-700 hover:bg-emerald-800 text-white'
-                  : 'bg-teal-700 hover:bg-teal-800 text-white'
-              }`}
+              onClick={() => copyStoreMedicineList(activeStore.id)}
+              className="min-h-[44px] px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-100 text-slate-800 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
             >
-              {isAllAddedForActiveStore ? (
+              {copiedBundle ? (
                 <>
-                  <Check className="w-4 h-4 shrink-0" />
-                  <span>
-                    All {result.medicines.length} Medicines Added (₹
-                    {activeStore.totalBill.toFixed(2)})
-                  </span>
+                  <Check className="w-3.5 h-3.5 text-emerald-700" />
+                  <span>Copied List</span>
                 </>
               ) : (
                 <>
-                  <ShoppingCart className="w-4 h-4 shrink-0" />
-                  <span>
-                    Add All {result.medicines.length} Medicines at Once (₹
-                    {activeStore.totalBill.toFixed(2)})
-                  </span>
+                  <Copy className="w-3.5 h-3.5 text-slate-600" />
+                  <span>Copy List</span>
                 </>
               )}
             </button>
 
+            {/* Download Shopping List */}
+            <button
+              type="button"
+              onClick={handleDownloadShoppingList}
+              className="min-h-[44px] px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-100 text-slate-800 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5 text-slate-600" />
+              <span>Download List</span>
+            </button>
+
+            {/* Share on WhatsApp */}
             <a
-              href={activeStore.bulkOrderUrl}
+              href={`https://wa.me/?text=${encodeURIComponent(
+                `[VeriMed Prescription Order List - ${activeStore.name}]\n` +
+                  activeStore.items
+                    .map(
+                      (i, idx) =>
+                        `${idx + 1}. ${i.medName} (${i.quantity}x ${i.packSize}) - ₹${i.lineTotal.toFixed(2)}`
+                    )
+                    .join('\n') +
+                  `\nTotal on ${activeStore.name}: ₹${activeStore.totalBill.toFixed(2)} (Saved ₹${activeStore.totalSaved.toFixed(2)})`
+              )}`}
               target="_blank"
               rel="noopener noreferrer"
-              onClick={() => {
-                setBulkAddedStoreId(activeStore.id);
-                setOrderConfirmedStoreId(activeStore.id);
-              }}
-              className="min-h-[44px] px-4 py-2.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-100 text-slate-800 text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+              className="min-h-[44px] px-3.5 py-2.5 rounded-xl border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 text-xs font-bold inline-flex items-center gap-1.5 transition-colors"
             >
-              <span>Open {activeStore.name}</span>
-              <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+              <MessageSquare className="w-3.5 h-3.5 text-emerald-700" />
+              <span>WhatsApp List</span>
             </a>
           </div>
         </div>

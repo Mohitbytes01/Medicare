@@ -14,8 +14,8 @@ export default defineConfig(() => {
         includeAssets: ['icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png'],
         manifest: {
           id: '/',
-          name: 'Medi-Verify AI — Clinical Prescription & Price Auditor',
-          short_name: 'MediVerify',
+          name: 'VeriMed — Clinical Prescription & Price Auditor',
+          short_name: 'VeriMed',
           description: 'Multimodal prescription OCR, drug interaction safety auditor, Bengali/Hindi dosage translator, and Indian pharmacy price comparison.',
           theme_color: '#0F172A',
           background_color: '#F8FAFC',

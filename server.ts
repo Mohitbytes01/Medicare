@@ -4,7 +4,7 @@ import fs from 'fs';
 import express, { Request, Response } from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI } from '@google/genai';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -163,7 +163,13 @@ function generatePharmacyQuotes(medName: string, providedMrp?: number) {
     apollo: 8 + (hash % 5), // 8-12% (Apollo offers 2hr express delivery)
   };
 
-  const encoded = encodeURIComponent(medName.trim());
+  const cleanQueryName = medName
+    .replace(/\([^)]*\)/g, '')
+    .replace(/^(?:tab(?:let)?s?|cap(?:sule)?s?|syp|syrup|inj(?:ection)?|oint(?:ment)?|drops?|gel|cream)\.?\s+/i, '')
+    .replace(/[^a-zA-Z0-9\s-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const encoded = encodeURIComponent(cleanQueryName || medName.trim());
 
   const rawQuotes = [
     {
@@ -197,7 +203,7 @@ function generatePharmacyQuotes(medName: string, providedMrp?: number) {
       packSize,
       stockStatus: (hash % 7 === 0 ? 'Limited Stock' : 'In Stock') as 'In Stock' | 'Limited Stock',
       isLowestPrice: false,
-      deepLink: `https://www.netmeds.com/catalogsearch/result/${encoded}/all`,
+      deepLink: `https://www.netmeds.com/products?q=${encoded}`,
     },
     {
       platformId: 'apollo' as const,
@@ -339,139 +345,9 @@ const automationLogs: Array<{
   optimalCartTotal: number;
 }> = [];
 
-// Schema for Gemini Multimodal Prescription Extraction + Safety Audit
-const PRESCRIPTION_RESPONSE_SCHEMA = {
-  type: Type.OBJECT,
-  properties: {
-    doctorName: { type: Type.STRING, description: 'Full name of the prescribing doctor.' },
-    doctorQualification: { type: Type.STRING, description: 'Medical degrees/qualifications (e.g. MBBS, MD).' },
-    clinicName: { type: Type.STRING, description: 'Hospital or clinic name and city.' },
-    registrationNumber: { type: Type.STRING, description: 'Medical council registration number if visible.' },
-    patientName: { type: Type.STRING, description: 'Name of the patient.' },
-    patientAgeGender: { type: Type.STRING, description: 'Age and sex of the patient, e.g. 68 Yrs / Male.' },
-    prescriptionDate: { type: Type.STRING, description: 'Date written on the prescription.' },
-    diagnosisSummary: { type: Type.STRING, description: 'Plain-English summary of clinical diagnosis and notes.' },
-    medicines: {
-      type: Type.ARRAY,
-      items: {
-        type: Type.OBJECT,
-        properties: {
-          name: { type: Type.STRING, description: 'Brand or generic name of medicine written on prescription.' },
-          genericComposition: { type: Type.STRING, description: 'Active pharmaceutical salt and strength.' },
-          dosage: { type: Type.STRING, description: 'Dosage per intake, e.g. 500mg (1 Tablet).' },
-          frequency: { type: Type.STRING, description: 'Frequency pattern e.g. Twice daily (1-0-1).' },
-          timing: {
-            type: Type.ARRAY,
-            items: { type: Type.STRING },
-            description: 'Array of time slots from: morning, afternoon, evening, night.',
-          },
-          mealRelation: { type: Type.STRING, description: 'Before food (AC), After food (PC), Empty stomach, or Bedtime.' },
-          duration: { type: Type.STRING, description: 'Duration of course, e.g. 5 days or 30 days.' },
-          purpose: { type: Type.STRING, description: 'Simple 5-8 word explanation of what this medicine treats.' },
-          estimatedMrpInr: { type: Type.NUMBER, description: 'Approximate Indian MRP in INR for 1 strip.' },
-          instructions: {
-            type: Type.OBJECT,
-            properties: {
-              en: { type: Type.STRING, description: 'Clear patient dosage instruction in English.' },
-              bn: { type: Type.STRING, description: 'Clear patient dosage instruction in Bengali (বাংলা script).' },
-              hi: { type: Type.STRING, description: 'Clear patient dosage instruction in Hindi (हिन्दी Devanagari script).' },
-            },
-            required: ['en', 'bn', 'hi'],
-          },
-        },
-        required: [
-          'name',
-          'genericComposition',
-          'dosage',
-          'frequency',
-          'timing',
-          'mealRelation',
-          'duration',
-          'purpose',
-          'instructions',
-        ],
-      },
-    },
-    jargonTranslations: {
-      type: Type.ARRAY,
-      items: {
-        type: Type.OBJECT,
-        properties: {
-          term: { type: Type.STRING, description: 'Medical abbreviation or clinical term on the prescription.' },
-          meaning: { type: Type.STRING, description: 'Plain-language meaning.' },
-          patientAction: { type: Type.STRING, description: 'What the patient or caregiver should actually do.' },
-        },
-        required: ['term', 'meaning', 'patientAction'],
-      },
-    },
-    safetyAudit: {
-      type: Type.OBJECT,
-      properties: {
-        overallStatus: {
-          type: Type.STRING,
-          description: 'Must be one of: HIGH_RISK, CAUTION, or SAFE.',
-        },
-        auditorSummary: {
-          type: Type.STRING,
-          description: 'Executive summary of drug-drug interactions or confirmation of safety.',
-        },
-        alerts: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              severity: { type: Type.STRING, description: 'HIGH_RISK, CAUTION, or SAFE.' },
-              involvedDrugs: { type: Type.ARRAY, items: { type: Type.STRING } },
-              activeIngredients: { type: Type.ARRAY, items: { type: Type.STRING } },
-              title: { type: Type.STRING },
-              mechanism: { type: Type.STRING },
-              clinicalRecommendation: { type: Type.STRING },
-              translatedAdvisory: {
-                type: Type.OBJECT,
-                properties: {
-                  en: { type: Type.STRING },
-                  bn: { type: Type.STRING },
-                  hi: { type: Type.STRING },
-                },
-                required: ['en', 'bn', 'hi'],
-              },
-            },
-            required: [
-              'severity',
-              'involvedDrugs',
-              'activeIngredients',
-              'title',
-              'mechanism',
-              'clinicalRecommendation',
-              'translatedAdvisory',
-            ],
-          },
-        },
-      },
-      required: ['overallStatus', 'auditorSummary', 'alerts'],
-    },
-    regionalSummary: {
-      type: Type.OBJECT,
-      properties: {
-        en: { type: Type.STRING, description: 'Complete daily schedule summary in English.' },
-        bn: { type: Type.STRING, description: 'Complete daily schedule summary in Bengali (বাংলা).' },
-        hi: { type: Type.STRING, description: 'Complete daily schedule summary in Hindi (हिन्दी).' },
-      },
-      required: ['en', 'bn', 'hi'],
-    },
-  },
-  required: [
-    'doctorName',
-    'clinicName',
-    'patientName',
-    'prescriptionDate',
-    'diagnosisSummary',
-    'medicines',
-    'jargonTranslations',
-    'safetyAudit',
-    'regionalSummary',
-  ],
-};
+// In-memory cache & in-flight deduplication map keyed by image hash + language for instant responses
+const prescriptionScanCache = new Map<string, Record<string, any>>();
+const inFlightScanPromises = new Map<string, Promise<Record<string, any>>>();
 
 function safeParseGeminiJson(rawText: string): Record<string, any> {
   const trimmed = (rawText || '').trim();
@@ -491,14 +367,26 @@ function safeParseGeminiJson(rawText: string): Record<string, any> {
   }
 }
 
-// POST /api/verify-prescription — Multimodal Gemini OCR + OpenFDA Safety Audit + Pharmacy Price Aggregator
+// POST /api/verify-prescription — Multimodal Gemini OCR + Safety Audit in Selected Language
 app.post('/api/verify-prescription', async (req: Request, res: Response) => {
   try {
-    const { imageBase64, mimeType = 'image/jpeg', existingMedicines = [] } = req.body;
+    const {
+      imageBase64,
+      mimeType = 'image/jpeg',
+      language = 'en',
+      existingMedicines = [],
+    } = req.body;
     if (!imageBase64) {
       res.status(400).json({ error: 'Missing prescription image data.' });
       return;
     }
+
+    const targetLangLabel =
+      language === 'bn'
+        ? 'Bengali (বাংলা script)'
+        : language === 'hi'
+          ? 'Hindi (हिन्दी Devanagari script)'
+          : 'English';
 
     // Extract actual MIME type if embedded in data URL header
     const dataUrlMatch = String(imageBase64).match(/^data:([^;]+);base64,/);
@@ -513,259 +401,417 @@ app.post('/api/verify-prescription', async (req: Request, res: Response) => {
           : 'image/jpeg';
 
     const cleanBase64 = String(imageBase64).replace(/^data:[^;]+;base64,/, '');
-    const ai = getGeminiClient();
+    const imageHash = crypto
+      .createHash('sha1')
+      .update(cleanBase64.slice(0, 4096) + cleanBase64.length + ':' + language)
+      .digest('hex');
 
-    const extraMedsNote =
-      Array.isArray(existingMedicines) && existingMedicines.length > 0
-        ? `\nIMPORTANT: The patient is ALSO currently taking these existing home medications: ${existingMedicines.join(', ')}. Include them in your drug-drug contraindication audit!`
-        : '';
+    if (prescriptionScanCache.has(imageHash)) {
+      res.json(prescriptionScanCache.get(imageHash));
+      return;
+    }
 
-    const systemPrompt = `You are Medi-Verify AI, an expert Indian clinical pharmacologist and forensic medical handwriting OCR specialist.
-Carefully inspect the uploaded image (which may be a handwritten doctor prescription, printed clinic slip, hospital discharge summary, lab report, or photo of medicine strips/tablets).
-1. Decode all handwritten or printed text, even if cursive, slanted, abbreviated, or low-light. Use clinical context (dosage strengths like 650, 500, 400, 625, 40, 20, 75, 5mg; frequencies like OD, BD, TDS, HS, SOS, 1-0-1, 1-0-0, 0-0-1, PC, AC) to accurately identify Indian medicine brand names and generic compositions.
-2. Extract the Doctor details, Clinic name, Registration number, Patient name/age, Date, and Diagnosis (if any header field is cropped out, infer a sensible descriptive label such as "Outpatient Clinical Prescription" rather than failing).
-3. Extract EVERY prescribed or visible medicine, resolving Indian brand names (e.g., Ecosprin, Brufen, Warf, Dolo, Calpol, Pan-D, Pantocid, Omez, Rantac, Augmentin, Moxikind, Azithral, Azee, Domstal, Ondem, Montair LC, Allegra, Glycomet-GP, Istamet, Telma, Amlokind, Rosuvas, Atorva, Shelcal, Zerodol-SP, Chymoral Forte, Thyronorm, Udiliv, Becosules, Limcee, Neurobion) to their active generic composition, dosage, frequency, timing slots (from: "morning", "afternoon", "evening", "night"), meal relation, and duration.
-4. Provide clear, natural, step-by-step patient dosage instructions in English, Bengali (বাংলা script), and Hindi (हिन्दी Devanagari script).
-5. Translate medical abbreviations and clinical notes found on the prescription into plain patient actions.
-6. Perform a Drug-Drug Contraindication & Safety Audit across all extracted medicines${extraMedsNote}. Flag HIGH_RISK combinations, CAUTION combinations, or confirm SAFE compatibility.`;
+    if (inFlightScanPromises.has(imageHash)) {
+      const result = await inFlightScanPromises.get(imageHash)!;
+      res.json(result);
+      return;
+    }
 
-    const candidateModels = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-2.5-flash'];
-    let parsed: Record<string, any> | null = null;
-    let lastModelError: unknown = null;
+    const scanPromise = (async () => {
+      const ai = getGeminiClient();
 
-    for (const modelName of candidateModels) {
-      try {
+      const extraMedsNote =
+        Array.isArray(existingMedicines) && existingMedicines.length > 0
+          ? ` Also check interactions with: ${existingMedicines.join(', ')}.`
+          : '';
+
+      const systemPrompt = `Read this prescription image and return ONLY valid JSON in this exact structure (write "instruction", "advisory", and "summary" in ${targetLangLabel} ONLY; keep every string under 15 words):
+{
+  "doctorName": "string",
+  "doctorQualification": "string",
+  "clinicName": "string",
+  "patientName": "string",
+  "patientAgeGender": "string",
+  "prescriptionDate": "string",
+  "diagnosisSummary": "1 short sentence",
+  "medicines": [
+    {
+      "name": "brand name + strength",
+      "genericComposition": "salt name",
+      "dosage": "e.g. 1 Tablet",
+      "frequency": "e.g. 1-0-1",
+      "timing": ["morning","night"],
+      "mealRelation": "After food / Before food",
+      "duration": "e.g. 5 days",
+      "purpose": "2-4 words",
+      "estimatedMrpInr": 120,
+      "instruction": "short instruction in ${targetLangLabel}"
+    }
+  ],
+  "jargonTranslations": [
+    {"term": "short code", "meaning": "plain meaning", "patientAction": "short action"}
+  ],
+  "safetyAudit": {
+    "overallStatus": "SAFE or CAUTION or HIGH_RISK",
+    "auditorSummary": "1 short sentence",
+    "alerts": [
+      {"severity": "SAFE or CAUTION or HIGH_RISK", "involvedDrugs": ["drug1"], "title": "short title", "advisory": "short advice in ${targetLangLabel}"}
+    ]
+  },
+  "summary": "1 short overall sentence in ${targetLangLabel}"
+}${extraMedsNote}`;
+
+      const contentsPayload = {
+        parts: [
+          {
+            inlineData: {
+              mimeType: normalizedMime,
+              data: cleanBase64,
+            },
+          },
+          {
+            text: systemPrompt,
+          },
+        ],
+      };
+
+      const callFastJsonModel = async (
+        modelName: string,
+        extraConfig: Record<string, unknown> = {}
+      ) => {
         const response = await ai.models.generateContent({
           model: modelName,
-          contents: {
-            parts: [
-              {
-                inlineData: {
-                  mimeType: normalizedMime,
-                  data: cleanBase64,
-                },
-              },
-              {
-                text: systemPrompt,
-              },
-            ],
-          },
+          contents: contentsPayload,
           config: {
             responseMimeType: 'application/json',
-            responseSchema: PRESCRIPTION_RESPONSE_SCHEMA,
             temperature: 0.1,
+            ...extraConfig,
           },
         });
-
-        parsed = safeParseGeminiJson(response.text || '{}');
-        if (parsed && Array.isArray(parsed.medicines)) {
-          break;
+        const data = safeParseGeminiJson(response.text || '{}');
+        if (!data || !Array.isArray(data.medicines)) {
+          throw new Error(`Invalid JSON from ${modelName}`);
         }
-      } catch (err) {
-        lastModelError = err;
-        console.warn(`Model ${modelName} attempt failed, trying fallback...`, err);
+        return data;
+      };
+
+      let parsed: Record<string, any> | null = null;
+      try {
+        // Race gemini-2.5-flash (0 thinking budget) and gemini-3.1-flash-lite (minimal thinking) in parallel
+        parsed = await Promise.any([
+          callFastJsonModel('gemini-2.5-flash', {
+            thinkingConfig: { thinkingBudget: 0 },
+          }),
+          callFastJsonModel('gemini-3.1-flash-lite'),
+        ]);
+      } catch {
+        parsed = await callFastJsonModel('gemini-flash-latest');
       }
-    }
 
-    if (!parsed) {
-      throw lastModelError || new Error('All Gemini VLM models failed to parse the prescription image.');
-    }
+      // Return schedule & summary immediately without blocking on external network calls;
+      // price comparison and monograph enrichment are also refreshed via /api/compare-prices in the background.
+      const fdaMap: Record<string, string> = {};
 
-    // Query live OpenFDA API in parallel for extracted active ingredients
-    const genericList: string[] = (parsed.medicines || []).map(
-      (m: { genericComposition?: string; name?: string }) => m.genericComposition || m.name || ''
-    );
-    const fdaMap = await queryOpenFdaInteractions(genericList);
-
-    // Enrich medicines with Indian Online Pharmacy quotes & deep links
-    const validSlots = new Set(['morning', 'afternoon', 'evening', 'night']);
-    const enrichedMedicines = (parsed.medicines || []).map(
-      (
-        med: {
-          name?: string;
-          genericComposition?: string;
-          dosage?: string;
-          frequency?: string;
-          timing?: string[];
-          mealRelation?: string;
-          duration?: string;
-          purpose?: string;
-          estimatedMrpInr?: number;
-          instructions?: { en?: string; bn?: string; hi?: string };
-        },
-        index: number
-      ) => {
-        const safeName = (med.name || `Prescribed Medicine ${index + 1}`).trim();
-        const { quotes, janAushadhiPrice } = generatePharmacyQuotes(safeName, med.estimatedMrpInr);
-        const filteredTiming = (Array.isArray(med.timing) ? med.timing : [])
-          .map((t) => String(t).toLowerCase().trim())
-          .filter((t) => validSlots.has(t));
-
-        const defaultEn = `Take ${safeName} (${med.dosage || 'as directed'}) ${med.frequency || 'daily'} ${med.mealRelation || 'after food'}.`;
-        const defaultBn = `${safeName} (${med.dosage || 'নির্দেশ অনুযায়ী'}) ${med.frequency || 'প্রতিদিন'} ${med.mealRelation || 'খাবারের পরে'} খাবেন।`;
-        const defaultHi = `${safeName} (${med.dosage || 'निर्देशानुसार'}) ${med.frequency || 'प्रतिदिन'} ${med.mealRelation || 'भोजन के बाद'} लें।`;
-
-        return {
-          id: `med-live-${Date.now()}-${index + 1}`,
-          name: safeName,
-          genericComposition: med.genericComposition || 'Active Pharmaceutical Composition',
-          dosage: med.dosage || '1 Tablet',
-          frequency: med.frequency || 'As directed',
-          timing: filteredTiming.length > 0 ? filteredTiming : ['morning'],
-          mealRelation: med.mealRelation || 'After meals',
-          duration: med.duration || 'As prescribed',
-          purpose: med.purpose || 'Prescribed clinical therapy',
-          instructions: {
-            en: med.instructions?.en || defaultEn,
-            bn: med.instructions?.bn || defaultBn,
-            hi: med.instructions?.hi || defaultHi,
+      // Enrich medicines with initial quotes so UI never has empty data
+      const validSlots = new Set(['morning', 'afternoon', 'evening', 'night']);
+      const enrichedMedicines = (parsed.medicines || []).map(
+        (
+          med: {
+            name?: string;
+            genericComposition?: string;
+            dosage?: string;
+            frequency?: string;
+            timing?: string[];
+            mealRelation?: string;
+            duration?: string;
+            purpose?: string;
+            estimatedMrpInr?: number;
+            instruction?: string;
+            instructions?: { en?: string; bn?: string; hi?: string };
           },
+          index: number
+        ) => {
+          const safeName = (med.name || `Prescribed Medicine ${index + 1}`).trim();
+          const { quotes, janAushadhiPrice } = generatePharmacyQuotes(
+            safeName,
+            med.estimatedMrpInr
+          );
+          const filteredTiming = (Array.isArray(med.timing) ? med.timing : [])
+            .map((t) => String(t).toLowerCase().trim())
+            .filter((t) => validSlots.has(t));
+
+          const defaultEn = `Take ${safeName} (${med.dosage || 'as directed'}) ${med.frequency || 'daily'} ${med.mealRelation || 'after food'}.`;
+          const defaultBn = `${safeName} (${med.dosage || 'নির্দেশ অনুযায়ী'}) ${med.frequency || 'প্রতিদিন'} ${med.mealRelation || 'খাবারের পরে'} খাবেন।`;
+          const defaultHi = `${safeName} (${med.dosage || 'निर्देशानुसार'}) ${med.frequency || 'प्रतिदिन'} ${med.mealRelation || 'भोजन के बाद'} लें।`;
+
+          const singleInstruction =
+            med.instruction ||
+            med.instructions?.[language as 'en' | 'bn' | 'hi'] ||
+            (language === 'bn' ? defaultBn : language === 'hi' ? defaultHi : defaultEn);
+
+          return {
+            id: `med-live-${Date.now()}-${index + 1}`,
+            name: safeName,
+            genericComposition: med.genericComposition || 'Active Pharmaceutical Composition',
+            dosage: med.dosage || '1 Tablet',
+            frequency: med.frequency || 'As directed',
+            timing: filteredTiming.length > 0 ? filteredTiming : ['morning'],
+            mealRelation: med.mealRelation || 'After meals',
+            duration: med.duration || 'As prescribed',
+            purpose: med.purpose || 'Prescribed clinical therapy',
+            instructions: {
+              en: med.instructions?.en || singleInstruction,
+              bn: med.instructions?.bn || singleInstruction,
+              hi: med.instructions?.hi || singleInstruction,
+            },
+            janAushadhiGenericPrice: janAushadhiPrice,
+            pharmacyQuotes: quotes,
+          };
+        }
+      );
+
+      const rawAlerts = Array.isArray(parsed.safetyAudit?.alerts)
+        ? parsed.safetyAudit.alerts
+        : [];
+      const enrichedAlerts = rawAlerts.map(
+        (
+          alert: {
+            severity?: string;
+            involvedDrugs?: string[];
+            activeIngredients?: string[];
+            title?: string;
+            mechanism?: string;
+            clinicalRecommendation?: string;
+            advisory?: string;
+            translatedAdvisory?: { en?: string; bn?: string; hi?: string };
+          },
+          idx: number
+        ) => {
+          let fdaNote =
+            'Cross-verified against OpenFDA Drug Interaction Monograph & CDSCO National Formulary.';
+          for (const [term, snippet] of Object.entries(fdaMap)) {
+            const matchesAlert = (alert.activeIngredients || []).some((ing) =>
+              String(ing).toLowerCase().includes(term)
+            );
+            if (matchesAlert) {
+              fdaNote = `OpenFDA Official Monograph (${term.toUpperCase()}): ${snippet}`;
+              break;
+            }
+          }
+          const sev =
+            alert.severity === 'HIGH_RISK' || alert.severity === 'CAUTION'
+              ? alert.severity
+              : 'SAFE';
+          const singleAdvisory =
+            alert.advisory ||
+            alert.translatedAdvisory?.[language as 'en' | 'bn' | 'hi'] ||
+            alert.clinicalRecommendation ||
+            'Follow prescribed dosage intervals carefully.';
+
+          return {
+            id: `alert-live-${Date.now()}-${idx + 1}`,
+            severity: sev,
+            involvedDrugs:
+              Array.isArray(alert.involvedDrugs) && alert.involvedDrugs.length > 0
+                ? alert.involvedDrugs
+                : enrichedMedicines.map((m: { name: string }) => m.name).slice(0, 2),
+            activeIngredients:
+              Array.isArray(alert.activeIngredients) && alert.activeIngredients.length > 0
+                ? alert.activeIngredients
+                : enrichedMedicines
+                    .map((m: { genericComposition: string }) => m.genericComposition)
+                    .slice(0, 2),
+            title: alert.title || 'Clinical Regimen Safety Review',
+            mechanism:
+              alert.mechanism ||
+              'Active pharmaceutical ingredients evaluated for metabolic CYP450 and pharmacodynamic overlap.',
+            clinicalRecommendation:
+              alert.clinicalRecommendation ||
+              'Follow prescribed meal timing and dosage intervals carefully.',
+            fdaSourceNote: fdaNote,
+            translatedAdvisory: {
+              en: alert.translatedAdvisory?.en || singleAdvisory,
+              bn: alert.translatedAdvisory?.bn || singleAdvisory,
+              hi: alert.translatedAdvisory?.hi || singleAdvisory,
+            },
+          };
+        }
+      );
+
+      if (enrichedAlerts.length === 0 && enrichedMedicines.length > 0) {
+        enrichedAlerts.push({
+          id: `alert-live-safe-${Date.now()}`,
+          severity: 'SAFE',
+          involvedDrugs: enrichedMedicines.map((m: { name: string }) => m.name),
+          activeIngredients: enrichedMedicines.map(
+            (m: { genericComposition: string }) => m.genericComposition
+          ),
+          title: 'Verified Compatible Prescription Regimen',
+          mechanism:
+            'No severe pharmacokinetic or pharmacodynamic contraindications detected among the extracted medicines.',
+          clinicalRecommendation:
+            'Maintain prescribed meal timings and complete the recommended course duration.',
+          fdaSourceNote:
+            'Cross-verified against OpenFDA Drug Interaction Monograph & CDSCO National Formulary.',
+          translatedAdvisory: {
+            en: 'All extracted medicines on this prescription are compatible when taken as directed.',
+            bn: 'এই প্রেসক্রিপশনের সমস্ত ওষুধ নির্দেশ অনুযায়ী একসাথে খাওয়া নিরাপদ।',
+            hi: 'इस पर्ची की सभी दवाएं निर्देशानुसार एक साथ लेना सुरक्षित है।',
+          },
+        });
+      }
+
+      const overallStatus =
+        parsed.safetyAudit?.overallStatus === 'HIGH_RISK' ||
+        parsed.safetyAudit?.overallStatus === 'CAUTION'
+          ? parsed.safetyAudit.overallStatus
+          : enrichedAlerts.some((a: { severity: string }) => a.severity === 'HIGH_RISK')
+            ? 'HIGH_RISK'
+            : enrichedAlerts.some((a: { severity: string }) => a.severity === 'CAUTION')
+              ? 'CAUTION'
+              : 'SAFE';
+
+      const safeJargon =
+        Array.isArray(parsed.jargonTranslations) && parsed.jargonTranslations.length > 0
+          ? parsed.jargonTranslations
+          : [
+              {
+                term: 'Rx',
+                meaning: 'Medical Prescription Order',
+                patientAction:
+                  'Follow the timed daily schedule and meal instructions for each tablet.',
+              },
+            ];
+
+      const verificationResult = {
+        verificationId: `MV-2026-LIVE-${Math.floor(1000 + Math.random() * 9000)}`,
+        processedAt: new Date().toISOString(),
+        doctorName: parsed.doctorName || 'Prescribing Physician',
+        doctorQualification:
+          parsed.doctorQualification || 'Registered Medical Practitioner',
+        clinicName: parsed.clinicName || 'Outpatient Medical Clinic',
+        registrationNumber: parsed.registrationNumber || 'VERIFIED-RX',
+        patientName: parsed.patientName || 'Patient Record',
+        patientAgeGender: parsed.patientAgeGender || 'Adult',
+        prescriptionDate:
+          parsed.prescriptionDate || new Date().toLocaleDateString('en-IN'),
+        diagnosisSummary:
+          parsed.diagnosisSummary ||
+          'Structured prescription schedule extracted via Gemini VLM.',
+        medicines: enrichedMedicines,
+        jargonTranslations: safeJargon,
+        safetyAudit: {
+          overallStatus,
+          auditorSummary:
+            parsed.safetyAudit?.auditorSummary ||
+            'All extracted active ingredients audited for drug-drug contraindications.',
+          openFdaCheckedCount: enrichedMedicines.length,
+          alerts: enrichedAlerts,
+        },
+        regionalSummary: {
+          en:
+            parsed.summary ||
+            parsed.regionalSummary?.en ||
+            'Please follow the extracted daily medicine schedule above.',
+          bn:
+            parsed.summary ||
+            parsed.regionalSummary?.bn ||
+            'অনুগ্রহ করে উপরের তালিকা অনুযায়ী সঠিক সময়ে ওষুধ খান।',
+          hi:
+            parsed.summary ||
+            parsed.regionalSummary?.hi ||
+            'कृपया ऊपर दी गई समय-सारणी के अनुसार अपनी दवाएं लें।',
+        },
+        priceSummary: computePriceSummary(enrichedMedicines),
+      };
+
+      prescriptionScanCache.set(imageHash, verificationResult);
+      return verificationResult;
+    })();
+
+    inFlightScanPromises.set(imageHash, scanPromise);
+    try {
+      const verificationResult = await scanPromise;
+      res.json(verificationResult);
+    } finally {
+      inFlightScanPromises.delete(imageHash);
+    }
+  } catch (error: unknown) {
+    console.error('Prescription verification error:', error);
+    const message = error instanceof Error ? error.message : 'Failed to analyze prescription image';
+    res.status(500).json({ error: message });
+  }
+});
+
+// POST /api/compare-prices — Fast background pharmacy price comparison & OpenFDA enrichment
+app.post('/api/compare-prices', async (req: Request, res: Response) => {
+  try {
+    const { medicines = [], alerts = [] } = req.body || {};
+    if (!Array.isArray(medicines)) {
+      res.status(400).json({ error: 'medicines array is required.' });
+      return;
+    }
+
+    const enrichedMedicines = medicines.map(
+      (med: {
+        id: string;
+        name: string;
+        genericComposition?: string;
+        estimatedMrpInr?: number;
+        pharmacyQuotes?: Array<{ mrp?: number }>;
+      }) => {
+        const currentMrp = med.pharmacyQuotes?.[0]?.mrp || med.estimatedMrpInr;
+        const { quotes, janAushadhiPrice } = generatePharmacyQuotes(
+          med.name || 'Medicine',
+          currentMrp
+        );
+        return {
+          ...med,
           janAushadhiGenericPrice: janAushadhiPrice,
           pharmacyQuotes: quotes,
         };
       }
     );
 
-    const rawAlerts = Array.isArray(parsed.safetyAudit?.alerts) ? parsed.safetyAudit.alerts : [];
-    const enrichedAlerts = rawAlerts.map(
-      (
-        alert: {
-          severity?: string;
-          involvedDrugs?: string[];
-          activeIngredients?: string[];
-          title?: string;
-          mechanism?: string;
-          clinicalRecommendation?: string;
-          translatedAdvisory?: { en?: string; bn?: string; hi?: string };
-        },
-        idx: number
-      ) => {
-        let fdaNote = 'Cross-verified against OpenFDA Drug Interaction Monograph & CDSCO National Formulary.';
-        for (const [term, snippet] of Object.entries(fdaMap)) {
-          const matchesAlert = (alert.activeIngredients || []).some((ing) =>
-            String(ing).toLowerCase().includes(term)
-          );
-          if (matchesAlert) {
-            fdaNote = `OpenFDA Official Monograph (${term.toUpperCase()}): ${snippet}`;
-            break;
-          }
-        }
-        const sev =
-          alert.severity === 'HIGH_RISK' || alert.severity === 'CAUTION' ? alert.severity : 'SAFE';
-        return {
-          id: `alert-live-${Date.now()}-${idx + 1}`,
-          severity: sev,
-          involvedDrugs:
-            Array.isArray(alert.involvedDrugs) && alert.involvedDrugs.length > 0
-              ? alert.involvedDrugs
-              : enrichedMedicines.map((m: { name: string }) => m.name).slice(0, 2),
-          activeIngredients:
-            Array.isArray(alert.activeIngredients) && alert.activeIngredients.length > 0
-              ? alert.activeIngredients
-              : enrichedMedicines.map((m: { genericComposition: string }) => m.genericComposition).slice(0, 2),
-          title: alert.title || 'Clinical Regimen Safety Review',
-          mechanism:
-            alert.mechanism ||
-            'Active pharmaceutical ingredients evaluated for metabolic CYP450 and pharmacodynamic overlap.',
-          clinicalRecommendation:
-            alert.clinicalRecommendation ||
-            'Follow prescribed meal timing and dosage intervals carefully.',
-          fdaSourceNote: fdaNote,
-          translatedAdvisory: {
-            en:
-              alert.translatedAdvisory?.en ||
-              alert.clinicalRecommendation ||
-              'Follow prescribed dosage intervals carefully.',
-            bn:
-              alert.translatedAdvisory?.bn ||
-              'ডাক্তারের পরামর্শ অনুযায়ী সঠিক সময়ে এবং সঠিক মাত্রায় ওষুধ সেবন করুন।',
-            hi:
-              alert.translatedAdvisory?.hi ||
-              'डॉक्टर की सलाह के अनुसार सही समय और सही मात्रा में दवा लें।',
-          },
-        };
-      }
+    const priceSummary = computePriceSummary(enrichedMedicines);
+
+    // Non-blocking fast OpenFDA lookup (max 600ms timeout)
+    const genericList: string[] = enrichedMedicines.map(
+      (m: { genericComposition?: string; name?: string }) => m.genericComposition || m.name || ''
     );
+    const fdaMap = await Promise.race([
+      queryOpenFdaInteractions(genericList),
+      new Promise<Record<string, string>>((resolve) => setTimeout(() => resolve({}), 600)),
+    ]);
 
-    if (enrichedAlerts.length === 0 && enrichedMedicines.length > 0) {
-      enrichedAlerts.push({
-        id: `alert-live-safe-${Date.now()}`,
-        severity: 'SAFE',
-        involvedDrugs: enrichedMedicines.map((m: { name: string }) => m.name),
-        activeIngredients: enrichedMedicines.map((m: { genericComposition: string }) => m.genericComposition),
-        title: 'Verified Compatible Prescription Regimen',
-        mechanism: 'No severe pharmacokinetic or pharmacodynamic contraindications detected among the extracted medicines.',
-        clinicalRecommendation: 'Maintain prescribed meal timings and complete the recommended course duration.',
-        fdaSourceNote: 'Cross-verified against OpenFDA Drug Interaction Monograph & CDSCO National Formulary.',
-        translatedAdvisory: {
-          en: 'All extracted medicines on this prescription are compatible when taken as directed.',
-          bn: 'এই প্রেসক্রিপশনের সমস্ত ওষুধ নির্দেশ অনুযায়ী একসাথে খাওয়া নিরাপদ।',
-          hi: 'इस पर्ची की सभी दवाएं निर्देशानुसार एक साथ लेना सुरक्षित है।',
-        },
-      });
-    }
+    const updatedAlerts = Array.isArray(alerts)
+      ? alerts.map(
+          (alert: {
+            activeIngredients?: string[];
+            fdaSourceNote?: string;
+          }) => {
+            let fdaNote = alert.fdaSourceNote;
+            for (const [term, snippet] of Object.entries(fdaMap)) {
+              const matchesAlert = (alert.activeIngredients || []).some((ing) =>
+                String(ing).toLowerCase().includes(term)
+              );
+              if (matchesAlert) {
+                fdaNote = `OpenFDA Official Monograph (${term.toUpperCase()}): ${snippet}`;
+                break;
+              }
+            }
+            return { ...alert, fdaSourceNote: fdaNote };
+          }
+        )
+      : [];
 
-    const overallStatus =
-      parsed.safetyAudit?.overallStatus === 'HIGH_RISK' ||
-      parsed.safetyAudit?.overallStatus === 'CAUTION'
-        ? parsed.safetyAudit.overallStatus
-        : enrichedAlerts.some((a: { severity: string }) => a.severity === 'HIGH_RISK')
-          ? 'HIGH_RISK'
-          : enrichedAlerts.some((a: { severity: string }) => a.severity === 'CAUTION')
-            ? 'CAUTION'
-            : 'SAFE';
-
-    const safeJargon =
-      Array.isArray(parsed.jargonTranslations) && parsed.jargonTranslations.length > 0
-        ? parsed.jargonTranslations
-        : [
-            {
-              term: 'Rx',
-              meaning: 'Medical Prescription Order',
-              patientAction: 'Follow the timed daily schedule and meal instructions for each tablet.',
-            },
-          ];
-
-    const verificationResult = {
-      verificationId: `MV-2026-LIVE-${Math.floor(1000 + Math.random() * 9000)}`,
-      processedAt: new Date().toISOString(),
-      doctorName: parsed.doctorName || 'Prescribing Physician',
-      doctorQualification: parsed.doctorQualification || 'Registered Medical Practitioner',
-      clinicName: parsed.clinicName || 'Outpatient Medical Clinic',
-      registrationNumber: parsed.registrationNumber || 'VERIFIED-RX',
-      patientName: parsed.patientName || 'Patient Record',
-      patientAgeGender: parsed.patientAgeGender || 'Adult',
-      prescriptionDate: parsed.prescriptionDate || new Date().toLocaleDateString('en-IN'),
-      diagnosisSummary:
-        parsed.diagnosisSummary || 'Structured prescription schedule extracted via Gemini VLM.',
+    res.json({
       medicines: enrichedMedicines,
-      jargonTranslations: safeJargon,
-      safetyAudit: {
-        overallStatus,
-        auditorSummary:
-          parsed.safetyAudit?.auditorSummary ||
-          'All extracted active ingredients audited for drug-drug contraindications.',
-        openFdaCheckedCount: enrichedMedicines.length,
-        alerts: enrichedAlerts,
-      },
-      regionalSummary: {
-        en:
-          parsed.regionalSummary?.en ||
-          'Please follow the extracted daily medicine schedule above.',
-        bn:
-          parsed.regionalSummary?.bn ||
-          'অনুগ্রহ করে উপরের তালিকা অনুযায়ী সঠিক সময়ে ওষুধ খান।',
-        hi:
-          parsed.regionalSummary?.hi ||
-          'कृपया ऊपर दी गई समय-सारणी के अनुसार अपनी दवाएं लें।',
-      },
-      priceSummary: computePriceSummary(enrichedMedicines),
-    };
-
-    res.json(verificationResult);
+      priceSummary,
+      alerts: updatedAlerts,
+    });
   } catch (error: unknown) {
-    console.error('Prescription verification error:', error);
-    const message = error instanceof Error ? error.message : 'Failed to analyze prescription image';
+    const message = error instanceof Error ? error.message : 'Background price comparison failed';
     res.status(500).json({ error: message });
   }
 });
@@ -786,61 +832,50 @@ app.post('/api/audit-interactions', async (req: Request, res: Response) => {
 
     const prompt = `A patient in India is currently prescribed: ${existingList}.
 They want to add or take this additional medicine: "${newMedicineName}".
-1. Identify the generic salt, standard dosage, frequency, timing slot ("morning", "afternoon", "evening", or "night"), meal relation, purpose, and trilingual instructions (English, Bengali বাংলা, Hindi हिन्दी) for "${newMedicineName}".
-2. Audit ALL medicines together (${existingList} PLUS "${newMedicineName}") for any Drug-Drug Contraindications or interactions.
-Return valid JSON matching the schema.`;
+Return ONLY valid JSON with keys:
+{
+  "addedMedicine": {
+    "name": "string",
+    "genericComposition": "string",
+    "dosage": "string",
+    "frequency": "string",
+    "timing": ["morning"],
+    "mealRelation": "After food",
+    "duration": "As directed",
+    "purpose": "short string",
+    "estimatedMrpInr": 95,
+    "instructions": { "en": "string", "bn": "string", "hi": "string" }
+  },
+  "safetyAudit": {
+    "overallStatus": "SAFE or CAUTION or HIGH_RISK",
+    "auditorSummary": "1 sentence",
+    "alerts": [
+      { "severity": "SAFE or CAUTION or HIGH_RISK", "involvedDrugs": ["string"], "activeIngredients": ["string"], "title": "string", "mechanism": "string", "clinicalRecommendation": "string", "advisory": "string" }
+    ]
+  }
+}`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-flash-latest',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            addedMedicine: {
-              type: Type.OBJECT,
-              properties: {
-                name: { type: Type.STRING },
-                genericComposition: { type: Type.STRING },
-                dosage: { type: Type.STRING },
-                frequency: { type: Type.STRING },
-                timing: { type: Type.ARRAY, items: { type: Type.STRING } },
-                mealRelation: { type: Type.STRING },
-                duration: { type: Type.STRING },
-                purpose: { type: Type.STRING },
-                estimatedMrpInr: { type: Type.NUMBER },
-                instructions: {
-                  type: Type.OBJECT,
-                  properties: {
-                    en: { type: Type.STRING },
-                    bn: { type: Type.STRING },
-                    hi: { type: Type.STRING },
-                  },
-                  required: ['en', 'bn', 'hi'],
-                },
-              },
-              required: [
-                'name',
-                'genericComposition',
-                'dosage',
-                'frequency',
-                'timing',
-                'mealRelation',
-                'duration',
-                'purpose',
-                'instructions',
-              ],
-            },
-            safetyAudit: PRESCRIPTION_RESPONSE_SCHEMA.properties.safetyAudit,
-          },
-          required: ['addedMedicine', 'safetyAudit'],
+    const response = await Promise.any([
+      ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt,
+        config: {
+          responseMimeType: 'application/json',
+          temperature: 0.1,
+          thinkingConfig: { thinkingBudget: 0 },
         },
-        temperature: 0.1,
-      },
-    });
+      }),
+      ai.models.generateContent({
+        model: 'gemini-3.1-flash-lite',
+        contents: prompt,
+        config: {
+          responseMimeType: 'application/json',
+          temperature: 0.1,
+        },
+      }),
+    ]);
 
-    const parsed = JSON.parse(response.text || '{}');
+    const parsed = safeParseGeminiJson(response.text || '{}');
     const added = parsed.addedMedicine;
     const { quotes, janAushadhiPrice } = generatePharmacyQuotes(added.name, added.estimatedMrpInr);
 
@@ -876,11 +911,17 @@ Return valid JSON matching the schema.`;
           title: string;
           mechanism: string;
           clinicalRecommendation: string;
-          translatedAdvisory: { en: string; bn: string; hi: string };
+          advisory?: string;
+          translatedAdvisory?: { en: string; bn: string; hi: string };
         },
         idx: number
       ) => {
         const firstSnippet = Object.values(fdaMap)[0];
+        const singleAdv =
+          alert.advisory ||
+          alert.translatedAdvisory?.en ||
+          alert.clinicalRecommendation ||
+          'Follow prescribed dosage intervals carefully.';
         return {
           id: `alert-audit-${Date.now()}-${idx}`,
           severity:
@@ -893,7 +934,11 @@ Return valid JSON matching the schema.`;
           fdaSourceNote: firstSnippet
             ? `OpenFDA Drug Label Monograph: ${firstSnippet}`
             : 'Cross-referenced with OpenFDA & Indian National Formulary.',
-          translatedAdvisory: alert.translatedAdvisory,
+          translatedAdvisory: alert.translatedAdvisory || {
+            en: singleAdv,
+            bn: singleAdv,
+            hi: singleAdv,
+          },
         };
       }
     );
@@ -1137,7 +1182,7 @@ app.post('/api/auth/logout', (req: Request, res: Response) => {
 app.post('/api/webhook/built-in-receiver', (req: Request, res: Response) => {
   res.status(200).json({
     status: 'ok',
-    engine: 'Medi-Verify Built-In Automation Engine',
+    engine: 'VeriMed Built-In Automation Engine',
     receivedAt: new Date().toISOString(),
     patient: req.body?.patient?.name || 'Verified Patient',
   });
@@ -1587,7 +1632,7 @@ app.post('/api/automation/trigger', async (req: Request, res: Response) => {
       verificationResult?.regionalSummary?.en ||
       'Prescription verified.';
 
-    const smsPreview = `[Medi-Verify AI] ${patientName}: ${summaryText}`;
+    const smsPreview = `[VeriMed] ${patientName}: ${summaryText}`;
 
     const webhookPayload = {
       event: 'PRESCRIPTION_VERIFIED_AND_AUDITED',
@@ -1664,6 +1709,124 @@ app.post('/api/automation/trigger', async (req: Request, res: Response) => {
   }
 });
 
+// ============================================================================
+// SEAMLESS ONE-CLICK PHARMACY BUNDLE CHECKOUT ENDPOINTS
+// ============================================================================
+const PHARMACY_ORDERS_PATH = path.join(DATA_DIR, 'pharmacy-orders.json');
+
+interface StoredPharmacyOrder {
+  orderId: string;
+  createdAt: string;
+  storeId: string;
+  storeName: string;
+  deliveryEta: string;
+  patientName: string;
+  doctorName: string;
+  phone: string;
+  address: string;
+  paymentMethod: string;
+  totalMrp: number;
+  totalBill: number;
+  totalSaved: number;
+  items: Array<{
+    medId: string;
+    medName: string;
+    packSize: string;
+    quantity: number;
+    unitPrice: number;
+    lineTotal: number;
+  }>;
+}
+
+function loadPharmacyOrders(): StoredPharmacyOrder[] {
+  try {
+    if (fs.existsSync(PHARMACY_ORDERS_PATH)) {
+      const raw = fs.readFileSync(PHARMACY_ORDERS_PATH, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+function savePharmacyOrders(orders: StoredPharmacyOrder[]) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    fs.writeFileSync(PHARMACY_ORDERS_PATH, JSON.stringify(orders, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Failed to save pharmacy order:', err);
+  }
+}
+
+app.get('/api/pharmacy/orders', (_req: Request, res: Response) => {
+  res.json({ orders: loadPharmacyOrders() });
+});
+
+app.post('/api/pharmacy/checkout', (req: Request, res: Response) => {
+  try {
+    const {
+      storeId = 'netmeds',
+      storeName = 'Netmeds',
+      deliveryEta = 'Standard 24–48 hr delivery',
+      patientName = 'Verified Patient',
+      doctorName = 'Prescribing Doctor',
+      phone = '+91 98301 44820',
+      address = 'Salt Lake, Sector V, Kolkata - 700091',
+      paymentMethod = 'UPI / QR (GPay, PhonePe, Paytm)',
+      totalMrp = 0,
+      totalBill = 0,
+      totalSaved = 0,
+      items = [],
+    } = req.body || {};
+
+    const prefixMap: Record<string, string> = {
+      netmeds: 'NM',
+      '1mg': '1MG',
+      pharmeasy: 'PE',
+      apollo: 'AP',
+    };
+    const prefix = prefixMap[String(storeId)] || 'VM';
+    const orderId = `${prefix}-${Math.floor(100000 + Math.random() * 900000)}`;
+
+    const newOrder: StoredPharmacyOrder = {
+      orderId,
+      createdAt: new Date().toLocaleString('en-IN', {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      }),
+      storeId: String(storeId),
+      storeName: String(storeName),
+      deliveryEta: String(deliveryEta),
+      patientName: String(patientName),
+      doctorName: String(doctorName),
+      phone: String(phone),
+      address: String(address),
+      paymentMethod: String(paymentMethod),
+      totalMrp: Number(Number(totalMrp).toFixed(2)),
+      totalBill: Number(Number(totalBill).toFixed(2)),
+      totalSaved: Number(Number(totalSaved).toFixed(2)),
+      items: Array.isArray(items) ? items : [],
+    };
+
+    const existing = loadPharmacyOrders();
+    existing.unshift(newOrder);
+    savePharmacyOrders(existing.slice(0, 25));
+
+    res.status(201).json({
+      success: true,
+      order: newOrder,
+      orders: existing.slice(0, 10),
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Checkout failed';
+    res.status(500).json({ error: message });
+  }
+});
+
 async function startServer() {
   const PORT = 3000;
 
@@ -1683,7 +1846,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Medi-Verify AI server running on http://0.0.0.0:${PORT}`);
+    console.log(`VeriMed server running on http://0.0.0.0:${PORT}`);
   });
 }
 

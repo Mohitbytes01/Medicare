@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
+  Loader2,
   ShieldAlert,
   Volume2,
   VolumeX,
@@ -20,6 +21,7 @@ interface DosageScheduleViewProps {
   onNavigateTab: (
     tab: 'schedule' | 'safety' | 'prices' | 'care_circle' | 'automation'
   ) => void;
+  isComparingPrices?: boolean;
 }
 
 const LANGUAGE_LABELS: Array<{ id: SupportedLanguage; label: string }> = [
@@ -47,6 +49,7 @@ export const DosageScheduleView: React.FC<DosageScheduleViewProps> = ({
   language,
   onLanguageChange,
   onNavigateTab,
+  isComparingPrices = false,
 }) => {
   const [selectedSlot, setSelectedSlot] = useState<'all' | TimeSlot>('all');
   const [speakingId, setSpeakingId] = useState<string | null>(null);
@@ -207,26 +210,18 @@ export const DosageScheduleView: React.FC<DosageScheduleViewProps> = ({
           </div>
 
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 shrink-0">
-            <div
-              className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl"
-              role="group"
-              aria-label="Choose language"
+            <select
+              value={language}
+              onChange={(e) => onLanguageChange(e.target.value as SupportedLanguage)}
+              aria-label="Selected instruction language"
+              className="min-h-[40px] px-3 py-1.5 rounded-xl border border-slate-300 bg-white text-xs font-semibold text-slate-900 focus:outline-none focus:border-teal-700 cursor-pointer"
             >
               {LANGUAGE_LABELS.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => onLanguageChange(item.id)}
-                  className={`min-h-[38px] px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer ${
-                    language === item.id
-                      ? 'bg-white text-slate-900 shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
+                <option key={item.id} value={item.id}>
                   {item.label}
-                </button>
+                </option>
               ))}
-            </div>
+            </select>
 
             <button
               type="button"
@@ -440,29 +435,41 @@ export const DosageScheduleView: React.FC<DosageScheduleViewProps> = ({
                       )}
                     </div>
 
-                    {/* Right Price Preview */}
-                    {lowestQuote && (
+                    {/* Right Price Preview (Shows background comparison indicator while prices load) */}
+                    {isComparingPrices ? (
                       <div className="lg:text-right flex sm:flex-row lg:flex-col items-start sm:items-center lg:items-end justify-between gap-2 pt-3 lg:pt-0 border-t lg:border-t-0 border-slate-100 shrink-0">
-                        <div>
-                          <div className="text-xs text-slate-500">
-                            Best Price on {lowestQuote.platformName}
-                          </div>
-                          <div className="text-base font-bold font-mono tabular-nums text-slate-900">
-                            ₹{lowestQuote.discountedPrice.toFixed(2)}{' '}
-                            <span className="text-xs font-normal text-slate-400 line-through">
-                              ₹{lowestQuote.mrp.toFixed(2)}
-                            </span>
-                          </div>
+                        <div className="flex items-center gap-1.5 text-xs font-semibold text-teal-700">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                          <span>Comparing 4 pharmacies...</span>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => onNavigateTab('prices')}
-                          className="min-h-[38px] px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-xs font-semibold text-slate-800 flex items-center gap-1.5 transition-colors whitespace-nowrap cursor-pointer"
-                        >
-                          <span>Buy / Compare</span>
-                          <ArrowRight className="w-3.5 h-3.5" />
-                        </button>
+                        <span className="text-[11px] text-slate-400">
+                          Running in background
+                        </span>
                       </div>
+                    ) : (
+                      lowestQuote && (
+                        <div className="lg:text-right flex sm:flex-row lg:flex-col items-start sm:items-center lg:items-end justify-between gap-2 pt-3 lg:pt-0 border-t lg:border-t-0 border-slate-100 shrink-0">
+                          <div>
+                            <div className="text-xs text-slate-500">
+                              Best Price on {lowestQuote.platformName}
+                            </div>
+                            <div className="text-base font-bold font-mono tabular-nums text-slate-900">
+                              ₹{lowestQuote.discountedPrice.toFixed(2)}{' '}
+                              <span className="text-xs font-normal text-slate-400 line-through">
+                                ₹{lowestQuote.mrp.toFixed(2)}
+                              </span>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => onNavigateTab('prices')}
+                            className="min-h-[38px] px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-xs font-semibold text-slate-800 flex items-center gap-1.5 transition-colors whitespace-nowrap cursor-pointer"
+                          >
+                            <span>Buy / Compare</span>
+                            <ArrowRight className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )
                     )}
                   </div>
                 </div>

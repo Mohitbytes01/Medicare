@@ -51,7 +51,7 @@ export const AutomationAndSchemaView: React.FC<AutomationAndSchemaViewProps> = (
       .catch(() => {});
   }, []);
 
-  const smsText = `[Medi-Verify AI] ${result.patientName} (${result.prescriptionDate}): ${result.regionalSummary[language]}`;
+  const smsText = `[VeriMed] ${result.patientName} (${result.prescriptionDate}): ${result.regionalSummary[language]}`;
   const cleanDigitsPhone = patientPhone.replace(/[^0-9]/g, '');
   const whatsappDeepLink = `https://wa.me/${cleanDigitsPhone}?text=${encodeURIComponent(smsText)}`;
   const nativeSmsDeepLink = `sms:+${cleanDigitsPhone}?body=${encodeURIComponent(smsText)}`;

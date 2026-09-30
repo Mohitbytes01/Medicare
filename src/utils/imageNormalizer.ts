@@ -32,7 +32,7 @@ export async function normalizeUploadedPrescriptionFile(
     const img = new Image();
     img.onload = () => {
       try {
-        const MAX_DIM = 1600;
+        const MAX_DIM = 800;
         let width = img.naturalWidth || img.width || 800;
         let height = img.naturalHeight || img.height || 1000;
 
@@ -63,7 +63,7 @@ export async function normalizeUploadedPrescriptionFile(
         ctx.fillRect(0, 0, width, height);
         ctx.drawImage(img, 0, 0, width, height);
 
-        const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.88);
+        const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.72);
         resolve({
           dataUrl: compressedDataUrl,
           mimeType: 'image/jpeg',

@@ -823,7 +823,7 @@ export const CareCircleView: React.FC<CareCircleViewProps> = ({
                   /[^0-9]/g,
                   ''
                 )}?text=${encodeURIComponent(
-                  `[Medi-Verify Care Circle] ${selectedMember.name} (${selectedMember.relation}): ${takenCount}/${totalCount} medicines taken today (${adherencePercent}%). Latest: ${selectedMember.lastCheckInText}`
+                  `[VeriMed Care Circle] ${selectedMember.name} (${selectedMember.relation}): ${takenCount}/${totalCount} medicines taken today (${adherencePercent}%). Latest: ${selectedMember.lastCheckInText}`
                 )}`}
                 target="_blank"
                 rel="noopener noreferrer"

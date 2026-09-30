@@ -7,11 +7,11 @@ import React, { useEffect, useState } from 'react';
 import {
   CalendarClock,
   IndianRupee,
+  Loader2,
   Send,
   ShieldAlert,
   Languages,
   Upload,
-  LogOut,
   LogIn,
   UserPlus,
   HeartHandshake,
@@ -29,9 +29,10 @@ import { PharmacyAggregatorView } from './components/PharmacyAggregatorView';
 import { AutomationAndSchemaView } from './components/AutomationAndSchemaView';
 import { CareCircleView } from './components/CareCircleView';
 import { AuthView } from './components/AuthView';
-import { OfflineIndicator, PWAInstallButton } from './components/PWAInstallButton';
+import { VeriMedLogo } from './components/VeriMedLogo';
+import { OfflineIndicator } from './components/PWAInstallButton';
 import { onAuthStateChanged } from 'firebase/auth';
-import { auth, signOutFromFirebase, syncFirebaseUserProfile } from './firebase';
+import { auth, syncFirebaseUserProfile } from './firebase';
 
 type ActiveTab = 'schedule' | 'safety' | 'prices' | 'care_circle' | 'automation';
 
@@ -84,6 +85,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('schedule');
   const [language, setLanguage] = useState<SupportedLanguage>('en');
   const [isScanning, setIsScanning] = useState<boolean>(false);
+  const [isComparingPrices, setIsComparingPrices] = useState<boolean>(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const [scanSuccessBanner, setScanSuccessBanner] = useState<string | null>(null);
 
@@ -142,47 +144,59 @@ export default function App() {
     setShowAuthScreen(false);
   };
 
-  const handleSignOut = async () => {
-    await signOutFromFirebase();
-    const savedToken = localStorage.getItem(AUTH_TOKEN_KEY);
-    if (savedToken) {
-      if (savedToken !== 'firebase_session') {
-        try {
-          await fetch('/api/auth/logout', {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${savedToken}` },
-          });
-        } catch {
-          // Ignore network errors during logout
-        }
-      }
-      localStorage.removeItem(AUTH_TOKEN_KEY);
+  const prewarmPrescriptionScan = (
+    imageDataUrl: string,
+    mimeType: string,
+    selectedLang: SupportedLanguage
+  ) => {
+    if (!imageDataUrl) return;
+    fetch('/api/verify-prescription', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        imageBase64: imageDataUrl,
+        mimeType,
+        language: selectedLang,
+      }),
+    }).catch(() => {
+      // Silent background pre-warm; errors handled if user clicks Analyze
+    });
+  };
+
+  const handleLanguageSelect = (newLang: SupportedLanguage) => {
+    setLanguage(newLang);
+    if (previewDataUrl) {
+      prewarmPrescriptionScan(previewDataUrl, uploadedMimeType, newLang);
     }
-    setCurrentUser(null);
-    setAuthScreenMode('signin');
-    setShowAuthScreen(true);
   };
 
   const handleUploadFile = async (file: File) => {
     setScanError(null);
     setScanSuccessBanner(null);
     setUploadedFileName(file.name);
-    setIsScanning(true);
 
     try {
       const { dataUrl, mimeType } = await normalizeUploadedPrescriptionFile(file);
       setPreviewDataUrl(dataUrl);
       setUploadedMimeType(mimeType);
-      await executeGeminiScan(dataUrl, mimeType);
+      setScanSuccessBanner(
+        'Photo loaded! Choose your language from the dropdown on the left and tap "Analyze Prescription".'
+      );
+      // Silently pre-warm the OCR + analysis for the currently selected language
+      // so clicking "Analyze Prescription" returns almost instantaneously
+      prewarmPrescriptionScan(dataUrl, mimeType, language);
     } catch (err: unknown) {
-      setIsScanning(false);
       setScanError(
         err instanceof Error ? err.message : 'Could not read the selected image file.'
       );
     }
   };
 
-  const executeGeminiScan = async (imageDataUrl: string, mimeType: string) => {
+  const executeGeminiScan = async (
+    imageDataUrl: string,
+    mimeType: string,
+    selectedLang: SupportedLanguage = language
+  ) => {
     if (!imageDataUrl) return;
     setIsScanning(true);
     setScanError(null);
@@ -195,6 +209,7 @@ export default function App() {
         body: JSON.stringify({
           imageBase64: imageDataUrl,
           mimeType,
+          language: selectedLang,
         }),
       });
       const data = await response.json();
@@ -203,17 +218,58 @@ export default function App() {
       }
       setVerificationResult(data);
       setActiveTab('schedule');
+      setIsScanning(false);
+
       const count = Array.isArray(data.medicines) ? data.medicines.length : 0;
       setScanSuccessBanner(
-        `Prescription read successfully! Found ${count} medicine(s) with Bengali, Hindi & English instructions.`
+        `Prescription read! Showing ${count} medicine(s) & schedule now — comparing pharmacy prices in the background...`
       );
+
+      // Run pharmacy price comparison & monograph check asynchronously in the background
+      setIsComparingPrices(true);
+      fetch('/api/compare-prices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          medicines: data.medicines || [],
+          alerts: data.safetyAudit?.alerts || [],
+        }),
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((bgData) => {
+          if (bgData && Array.isArray(bgData.medicines)) {
+            setVerificationResult((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    medicines: bgData.medicines,
+                    priceSummary: bgData.priceSummary || prev.priceSummary,
+                    safetyAudit: {
+                      ...prev.safetyAudit,
+                      alerts: Array.isArray(bgData.alerts)
+                        ? bgData.alerts
+                        : prev.safetyAudit.alerts,
+                    },
+                  }
+                : prev
+            );
+            setScanSuccessBanner(
+              `Prescription & lowest prices across 4 pharmacies ready for all ${count} medicine(s)!`
+            );
+          }
+        })
+        .catch(() => {
+          // Initial quotes are already present on data.medicines
+        })
+        .finally(() => {
+          setIsComparingPrices(false);
+        });
     } catch (err: unknown) {
       setScanError(
         err instanceof Error
           ? err.message
           : 'Could not read the photo clearly. Please try uploading a clearer image.'
       );
-    } finally {
       setIsScanning(false);
     }
   };
@@ -260,7 +316,7 @@ export default function App() {
     <div className="min-h-screen flex flex-col bg-[#F8FAFC] text-slate-900 pb-20 md:pb-12">
       {/* Strict 3-Zone Top Bar Contract */}
       <header className="sticky top-0 z-30 h-14 bg-white/95 backdrop-blur-md border-b border-slate-200 px-4 lg:px-8 flex items-center justify-between">
-        {/* Zone 1: Single Text Element Brand Wordmark */}
+        {/* Zone 1: Brand Logo & Wordmark */}
         <a
           href="#top"
           onClick={(e) => {
@@ -270,9 +326,10 @@ export default function App() {
             }
             setActiveTab('schedule');
           }}
-          className="text-lg font-bold tracking-tight text-slate-900 whitespace-nowrap"
+          className="inline-flex items-center whitespace-nowrap"
+          aria-label="VeriMed Health Home"
         >
-          Medi-Verify AI
+          <VeriMedLogo variant="horizontal" size="md" />
         </a>
 
         {/* Zone 2: Clean Text Navigation Links (visible when in main workspace) */}
@@ -283,18 +340,22 @@ export default function App() {
           >
             {navItems.map((item) => {
               const isActive = activeTab === item.id;
+              const isPricesLoading = item.id === 'prices' && isComparingPrices;
               return (
                 <button
                   key={item.id}
                   type="button"
                   onClick={() => setActiveTab(item.id)}
-                  className={`py-4 border-b-2 transition-colors whitespace-nowrap cursor-pointer ${
+                  className={`py-4 border-b-2 transition-colors whitespace-nowrap cursor-pointer inline-flex items-center gap-1.5 ${
                     isActive
                       ? 'border-teal-700 text-slate-900 font-semibold'
                       : 'border-transparent hover:text-slate-900 hover:border-slate-300'
                   }`}
                 >
-                  {item.label}
+                  <span>{item.label}</span>
+                  {isPricesLoading && (
+                    <Loader2 className="w-3.5 h-3.5 text-teal-700 animate-spin" />
+                  )}
                 </button>
               );
             })}
@@ -305,22 +366,11 @@ export default function App() {
 
         {/* Zone 3: User Account / Sign In & Register Actions */}
         <div className="flex items-center gap-2">
-          <PWAInstallButton />
-
           {currentUser ? (
             <div className="flex items-center gap-2.5 pl-1">
-              <span className="hidden sm:inline text-xs font-semibold text-slate-700 truncate max-w-[160px]">
+              <span className="text-xs font-semibold text-slate-700 truncate max-w-[160px]">
                 {currentUser.name}
               </span>
-              <button
-                type="button"
-                onClick={handleSignOut}
-                className="min-h-[38px] px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-xs font-semibold text-slate-700 inline-flex items-center gap-1.5 transition-colors whitespace-nowrap cursor-pointer"
-                title="Sign out of your account"
-              >
-                <LogOut className="w-3.5 h-3.5 text-slate-500" />
-                <span>Sign Out</span>
-              </button>
             </div>
           ) : (
             <div className="flex items-center gap-2">
@@ -364,7 +414,7 @@ export default function App() {
       <main className="flex-1 w-full max-w-[1360px] mx-auto px-4 lg:px-8 pt-6">
         {authChecking ? (
           <div className="py-20 text-center text-sm text-slate-500">
-            Loading your Medi-Verify AI account...
+            Loading your VeriMed account...
           </div>
         ) : showAuthScreen ? (
           <AuthView
@@ -373,23 +423,25 @@ export default function App() {
             onAuthSuccess={handleAuthSuccess}
             onContinueAsGuest={() => setShowAuthScreen(false)}
           />
-        ) : (
+        ) : activeTab === 'schedule' ? (
           <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 items-start">
-            {/* Left Column: Prescription Photo Uploader */}
+            {/* Left Column: Prescription Photo Uploader (Only on Medicine Schedule Page) */}
             <div className="xl:col-span-4 xl:sticky xl:top-20">
               <PrescriptionScannerPanel
                 previewDataUrl={previewDataUrl}
                 uploadedFileName={uploadedFileName}
+                language={language}
+                onLanguageChange={handleLanguageSelect}
                 isScanning={isScanning}
                 scanError={scanError}
                 onUploadFile={handleUploadFile}
                 onRunLiveGeminiScan={() =>
-                  executeGeminiScan(previewDataUrl, uploadedMimeType)
+                  executeGeminiScan(previewDataUrl, uploadedMimeType, language)
                 }
               />
             </div>
 
-            {/* Right Column: Family Care Circle, Feature Overview, or Live Prescription Results */}
+            {/* Right Column: Feature Overview or Live Medicine Schedule */}
             <div className="xl:col-span-8 min-w-0 space-y-4">
               {scanSuccessBanner && (
                 <div className="p-3.5 rounded-xl bg-teal-50 border border-teal-200 flex items-center justify-between gap-3 text-xs font-semibold text-teal-900">
@@ -404,13 +456,7 @@ export default function App() {
                 </div>
               )}
 
-              {activeTab === 'care_circle' ? (
-                <CareCircleView
-                  verificationResult={verificationResult}
-                  language={language}
-                  onLanguageChange={setLanguage}
-                />
-              ) : !verificationResult ? (
+              {!verificationResult ? (
                 <section className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 space-y-6">
                   <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 border-b border-slate-200 pb-5">
                     <div>
@@ -441,7 +487,7 @@ export default function App() {
                   {/* Clean List of App Features (Hairline Dividers, Zero Nested Cards) */}
                   <div>
                     <h2 className="text-sm font-bold text-slate-900 mb-3">
-                      What Medi-Verify AI Does For You:
+                      What VeriMed Does For You:
                     </h2>
                     <div className="divide-y divide-slate-200 border-t border-slate-200">
                       {APP_FEATURES.map((feat) => (
@@ -481,40 +527,75 @@ export default function App() {
                   </div>
                 </section>
               ) : (
-                <>
-                  {activeTab === 'schedule' && (
-                    <DosageScheduleView
-                      result={verificationResult}
-                      language={language}
-                      onLanguageChange={setLanguage}
-                      onNavigateTab={setActiveTab}
-                    />
-                  )}
-
-                  {activeTab === 'safety' && (
-                    <SafetyAuditorView
-                      result={verificationResult}
-                      language={language}
-                      onLanguageChange={setLanguage}
-                      onUpdateResult={setVerificationResult}
-                    />
-                  )}
-
-                  {activeTab === 'prices' && (
-                    <PharmacyAggregatorView result={verificationResult} />
-                  )}
-
-                  {activeTab === 'automation' && (
-                    <AutomationAndSchemaView
-                      result={verificationResult}
-                      language={language}
-                      onLanguageChange={setLanguage}
-                      defaultPhone={currentUser?.phone}
-                    />
-                  )}
-                </>
+                <DosageScheduleView
+                  result={verificationResult}
+                  language={language}
+                  onLanguageChange={setLanguage}
+                  onNavigateTab={setActiveTab}
+                  isComparingPrices={isComparingPrices}
+                />
               )}
             </div>
+          </div>
+        ) : (
+          /* Clean Full-Width Layout for Safety Check, Compare Prices, Care Circle, and Reminders */
+          <div className="w-full max-w-5xl mx-auto space-y-4">
+            {activeTab === 'care_circle' ? (
+              <CareCircleView
+                verificationResult={verificationResult}
+                language={language}
+                onLanguageChange={setLanguage}
+              />
+            ) : !verificationResult ? (
+              <section className="bg-white border border-slate-200 rounded-2xl p-8 text-center space-y-4">
+                <div className="w-11 h-11 rounded-xl bg-teal-50 border border-teal-200 text-teal-700 flex items-center justify-center mx-auto">
+                  <Upload className="w-5 h-5" />
+                </div>
+                <div className="max-w-md mx-auto space-y-1.5">
+                  <h2 className="text-lg font-bold text-slate-900">
+                    Upload a Prescription Photo First
+                  </h2>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Please upload and analyze your prescription on the{' '}
+                    <strong className="text-slate-900">Medicine Schedule</strong> page to view safety checks, pharmacy prices, and WhatsApp reminders.
+                  </p>
+                </div>
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('schedule')}
+                    className="min-h-[42px] px-5 py-2.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold inline-flex items-center gap-2 transition-colors cursor-pointer"
+                  >
+                    <Upload className="w-4 h-4" />
+                    <span>Go to Medicine Schedule to Upload Photo</span>
+                  </button>
+                </div>
+              </section>
+            ) : (
+              <>
+                {activeTab === 'safety' && (
+                  <SafetyAuditorView
+                    result={verificationResult}
+                    language={language}
+                    onLanguageChange={setLanguage}
+                    onUpdateResult={setVerificationResult}
+                  />
+                )}
+
+                {activeTab === 'prices' && (
+                  <PharmacyAggregatorView result={verificationResult} />
+                )}
+
+                {activeTab === 'automation' && (
+                  <AutomationAndSchemaView
+                    result={verificationResult}
+                    language={language}
+                    onLanguageChange={setLanguage}
+                    defaultPhone={currentUser?.phone}
+                  />
+                )}
+              </>
+            )}
           </div>
         )}
       </main>
@@ -522,9 +603,10 @@ export default function App() {
       {/* Quiet Clinical Footer */}
       <footer className="mt-16 border-t border-slate-200 bg-white py-6 px-4 lg:px-8">
         <div className="max-w-[1360px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
-          <p>
-            Medi-Verify AI · Prescription Reader, Safety Checker &amp; Family Care Circle
-          </p>
+          <div className="flex items-center gap-3">
+            <VeriMedLogo variant="horizontal" size="sm" />
+            <span>· Prescription Reader, Safety Checker &amp; Family Care Circle</span>
+          </div>
           <p>
             Always consult your doctor or pharmacist before changing how you take your medicines.
           </p>

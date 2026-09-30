@@ -40,7 +40,7 @@ export const PWAInstallButton: React.FC = () => {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h3 id="pwa-modal-title" className="text-base font-bold text-slate-900">
-                  Install Medi-Verify AI as a Mobile App
+                  Install VeriMed as a Mobile App
                 </h3>
                 <p className="mt-1 text-xs text-slate-600">
                   Access offline prescription schedules, Bengali/Hindi voice instructions, and emergency drug audits directly from your home screen.
@@ -68,7 +68,7 @@ export const PWAInstallButton: React.FC = () => {
                 <div className="space-y-2">
                   <p className="font-semibold text-slate-900">For Android / Desktop Chrome & Edge:</p>
                   <p>1. Open the browser menu (three dots in the address bar) or open this app in a full browser tab.</p>
-                  <p>2. Select <strong>Install Medi-Verify AI</strong> or <strong>Add to Home Screen</strong>.</p>
+                  <p>2. Select <strong>Install VeriMed</strong> or <strong>Add to Home Screen</strong>.</p>
                   <p>3. Service worker caching is active for instant offline access to verified schedules.</p>
                 </div>
               )}

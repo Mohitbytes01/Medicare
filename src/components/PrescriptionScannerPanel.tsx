@@ -3,38 +3,37 @@ import {
   Camera,
   CheckCircle2,
   FileText,
+  Languages,
   Maximize2,
   RefreshCw,
+  Sparkles,
   Upload,
   X,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
+import { SupportedLanguage } from '../types/prescription';
+
+const LANGUAGE_OPTIONS: Array<{ id: SupportedLanguage; label: string }> = [
+  { id: 'en', label: 'English' },
+  { id: 'bn', label: 'বাংলা (Bengali)' },
+  { id: 'hi', label: 'हिन्दी (Hindi)' },
+];
 
 const SCAN_STAGES = [
   {
     label: 'Analyzing handwriting...',
     detail: 'Reading doctor script, clinic details, and medical abbreviations',
-    threshold: 25,
+    threshold: 35,
   },
   {
     label: 'Extracting medicines & dosages...',
     detail: 'Identifying tablet strengths, meal relations, and daily schedule',
-    threshold: 50,
+    threshold: 70,
   },
   {
     label: 'Checking drug interactions...',
-    detail: 'Cross-checking medicines for clashes and safety warnings',
-    threshold: 72,
-  },
-  {
-    label: 'Translating into বাংলা, हिन्दी & English...',
-    detail: 'Preparing simple regional language dosage instructions',
-    threshold: 88,
-  },
-  {
-    label: 'Comparing online pharmacy prices...',
-    detail: 'Fetching lowest prices across Tata 1mg, PharmEasy, Netmeds & Apollo',
+    detail: 'Cross-checking medicines for clashes and preparing instructions',
     threshold: 100,
   },
 ];
@@ -42,6 +41,8 @@ const SCAN_STAGES = [
 interface PrescriptionScannerPanelProps {
   previewDataUrl: string;
   uploadedFileName: string | null;
+  language: SupportedLanguage;
+  onLanguageChange: (lang: SupportedLanguage) => void;
   isScanning: boolean;
   scanError: string | null;
   onUploadFile: (file: File) => void;
@@ -51,6 +52,8 @@ interface PrescriptionScannerPanelProps {
 export const PrescriptionScannerPanel: React.FC<PrescriptionScannerPanelProps> = ({
   previewDataUrl,
   uploadedFileName,
+  language,
+  onLanguageChange,
   isScanning,
   scanError,
   onUploadFile,
@@ -68,14 +71,14 @@ export const PrescriptionScannerPanel: React.FC<PrescriptionScannerPanelProps> =
       return;
     }
 
-    setScanProgress(10);
+    setScanProgress(18);
     const interval = window.setInterval(() => {
       setScanProgress((prev) => {
-        if (prev >= 94) return prev;
-        const step = prev < 50 ? 6 : prev < 80 ? 4 : 2;
-        return Math.min(94, prev + step);
+        if (prev >= 92) return prev;
+        const step = prev < 60 ? 12 : prev < 85 ? 7 : 3;
+        return Math.min(92, prev + step);
       });
-    }, 380);
+    }, 220);
 
     return () => window.clearInterval(interval);
   }, [isScanning]);
@@ -85,6 +88,9 @@ export const PrescriptionScannerPanel: React.FC<PrescriptionScannerPanelProps> =
     SCAN_STAGES.findIndex((s) => scanProgress <= s.threshold)
   );
   const currentStage = SCAN_STAGES[activeStageIndex] || SCAN_STAGES[0];
+
+  const selectedLanguageLabel =
+    LANGUAGE_OPTIONS.find((l) => l.id === language)?.label || 'English';
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -103,18 +109,18 @@ export const PrescriptionScannerPanel: React.FC<PrescriptionScannerPanelProps> =
   };
 
   return (
-    <aside className="w-full bg-white border border-slate-200 rounded-2xl p-5 flex flex-col gap-5">
+    <aside className="w-full bg-white border border-slate-200 rounded-2xl p-5 flex flex-col gap-4">
       {/* Simple Header */}
-      <div className="border-b border-slate-100 pb-4">
+      <div className="border-b border-slate-100 pb-3.5">
         <h2 className="text-base font-bold text-slate-900">
           Your Prescription Photo
         </h2>
         <p className="mt-1 text-xs text-slate-600">
-          Upload or take a clear photo of your doctor&apos;s prescription
+          1. Upload photo · 2. Select language from dropdown · 3. Tap Analyze
         </p>
       </div>
 
-      {/* Primary Upload & Camera Buttons right at the top for easy access */}
+      {/* Step 1: Upload & Camera Buttons */}
       <div className="grid grid-cols-2 gap-2.5">
         <input
           ref={fileInputRef}
@@ -135,19 +141,70 @@ export const PrescriptionScannerPanel: React.FC<PrescriptionScannerPanelProps> =
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="min-h-[46px] px-3.5 py-2.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-xs font-semibold transition-colors flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer"
+          className="min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-semibold transition-colors flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer"
         >
-          <Upload className="w-4 h-4 shrink-0" />
+          <Upload className="w-4 h-4 text-teal-700 shrink-0" />
           <span>Upload Photo</span>
         </button>
 
         <button
           type="button"
           onClick={() => cameraInputRef.current?.click()}
-          className="min-h-[46px] px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white text-xs font-semibold text-slate-800 hover:bg-slate-50 transition-colors flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer"
+          className="min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-xs font-semibold text-slate-800 hover:bg-slate-50 transition-colors flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer"
         >
           <Camera className="w-4 h-4 text-teal-700 shrink-0" />
           <span>Take Photo</span>
+        </button>
+      </div>
+
+      {/* Step 2: Language Dropdown Selector + Primary Analyze Button */}
+      <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+        <div>
+          <label
+            htmlFor="rx-language-select"
+            className="flex items-center gap-1.5 text-xs font-bold text-slate-800 mb-1.5"
+          >
+            <Languages className="w-3.5 h-3.5 text-teal-700" />
+            <span>Select Language for Analysis</span>
+          </label>
+          <select
+            id="rx-language-select"
+            value={language}
+            disabled={isScanning}
+            onChange={(e) => onLanguageChange(e.target.value as SupportedLanguage)}
+            className="w-full min-h-[42px] px-3 py-2 rounded-xl border border-slate-300 bg-white text-xs font-semibold text-slate-900 focus:outline-none focus:border-teal-700 cursor-pointer"
+          >
+            {LANGUAGE_OPTIONS.map((opt) => (
+              <option key={opt.id} value={opt.id}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <button
+          type="button"
+          disabled={!previewDataUrl || isScanning}
+          onClick={onRunLiveGeminiScan}
+          className="w-full min-h-[46px] px-4 py-2.5 rounded-xl bg-teal-700 hover:bg-teal-800 disabled:bg-slate-300 disabled:text-slate-500 text-white text-xs font-bold transition-colors flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap shadow-xs"
+        >
+          {isScanning ? (
+            <>
+              <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
+              <span>
+                {currentStage.label} ({scanProgress}%)
+              </span>
+            </>
+          ) : (
+            <>
+              <Sparkles className="w-4 h-4 shrink-0" />
+              <span>
+                {previewDataUrl
+                  ? `Analyze Prescription in ${selectedLanguageLabel}`
+                  : 'Upload a Photo First to Analyze'}
+              </span>
+            </>
+          )}
         </button>
       </div>
 
@@ -191,7 +248,7 @@ export const PrescriptionScannerPanel: React.FC<PrescriptionScannerPanelProps> =
         <div
           onDragOver={(e) => e.preventDefault()}
           onDrop={handleDrop}
-          className="relative h-[300px] overflow-auto flex items-start justify-center p-3 bg-slate-100"
+          className="relative h-[280px] overflow-auto flex items-start justify-center p-3 bg-slate-100"
         >
           {previewDataUrl ? (
             <img
@@ -236,14 +293,14 @@ export const PrescriptionScannerPanel: React.FC<PrescriptionScannerPanelProps> =
                   aria-label="Prescription scan progress"
                 >
                   <div
-                    className="h-full bg-teal-400 rounded-full transition-all duration-300 ease-out"
+                    className="h-full bg-teal-400 rounded-full transition-all duration-200 ease-out"
                     style={{ width: `${scanProgress}%` }}
                   />
                 </div>
 
                 {/* Current Stage Detail Subtitle */}
                 <p className="text-[11px] text-slate-300 leading-relaxed">
-                  {currentStage.detail}
+                  {currentStage.detail} ({selectedLanguageLabel})
                 </p>
 
                 {/* Step-by-Step Status Checklist */}
@@ -283,23 +340,6 @@ export const PrescriptionScannerPanel: React.FC<PrescriptionScannerPanelProps> =
           )}
         </div>
       </div>
-
-      {/* Re-Analyze Action Button (Only shown once a photo is uploaded) */}
-      {previewDataUrl && (
-        <button
-          type="button"
-          disabled={isScanning}
-          onClick={onRunLiveGeminiScan}
-          className="w-full min-h-[44px] px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:bg-slate-700 text-white text-xs font-semibold transition-colors flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap"
-        >
-          <RefreshCw className={`w-4 h-4 shrink-0 ${isScanning ? 'animate-spin text-teal-400' : ''}`} />
-          <span>
-            {isScanning
-              ? `${currentStage.label} (${scanProgress}%)`
-              : 'Read This Prescription Again'}
-          </span>
-        </button>
-      )}
 
       {scanError && (
         <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-800">
