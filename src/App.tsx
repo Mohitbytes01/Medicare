@@ -69,6 +69,12 @@ const APP_FEATURES = [
     description:
       'Add elderly parents or dependents to your Care Circle. Get daily status updates when they mark a dose as taken, and receive an alert if a dose is missed by over 1 hour.',
   },
+  {
+    number: '06',
+    title: 'WhatsApp Business Bot Channel (Zero-Friction Access)',
+    description:
+      'Elderly patients or users in Tier-2/3 cities can simply WhatsApp a photo of their prescription to VeriMed. The bot replies with a spoken Bengali/Hindi voice note explaining the schedule and a 1-tap lowest-price buy link.',
+  },
 ];
 
 export default function App() {
@@ -306,8 +312,8 @@ export default function App() {
     },
     {
       id: 'automation',
-      label: 'Send Reminders',
-      shortLabel: 'Reminders',
+      label: 'WhatsApp Bot',
+      shortLabel: 'WhatsApp',
       icon: Send,
     },
   ];
@@ -538,13 +544,21 @@ export default function App() {
             </div>
           </div>
         ) : (
-          /* Clean Full-Width Layout for Safety Check, Compare Prices, Care Circle, and Reminders */
+          /* Clean Full-Width Layout for Safety Check, Compare Prices, Care Circle, and WhatsApp Bot */
           <div className="w-full max-w-5xl mx-auto space-y-4">
             {activeTab === 'care_circle' ? (
               <CareCircleView
                 verificationResult={verificationResult}
                 language={language}
                 onLanguageChange={setLanguage}
+              />
+            ) : activeTab === 'automation' ? (
+              <AutomationAndSchemaView
+                result={verificationResult}
+                language={language}
+                onLanguageChange={setLanguage}
+                defaultPhone={currentUser?.phone}
+                onPrescriptionExtractedFromBot={(newRx) => setVerificationResult(newRx)}
               />
             ) : !verificationResult ? (
               <section className="bg-white border border-slate-200 rounded-2xl p-8 text-center space-y-4">
@@ -557,10 +571,11 @@ export default function App() {
                   </h2>
                   <p className="text-xs text-slate-600 leading-relaxed">
                     Please upload and analyze your prescription on the{' '}
-                    <strong className="text-slate-900">Medicine Schedule</strong> page to view safety checks, pharmacy prices, and WhatsApp reminders.
+                    <strong className="text-slate-900">Medicine Schedule</strong> page (or send it to the{' '}
+                    <strong className="text-slate-900">WhatsApp Bot</strong>) to view safety checks and pharmacy prices.
                   </p>
                 </div>
-                <div>
+                <div className="flex flex-wrap items-center justify-center gap-2.5">
                   <button
                     type="button"
                     onClick={() => setActiveTab('schedule')}
@@ -568,6 +583,14 @@ export default function App() {
                   >
                     <Upload className="w-4 h-4" />
                     <span>Go to Medicine Schedule to Upload Photo</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('automation')}
+                    className="min-h-[42px] px-5 py-2.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-bold inline-flex items-center gap-2 transition-colors cursor-pointer"
+                  >
+                    <Send className="w-4 h-4 text-emerald-700" />
+                    <span>Use WhatsApp Business Bot Instead</span>
                   </button>
                 </div>
               </section>
@@ -584,15 +607,6 @@ export default function App() {
 
                 {activeTab === 'prices' && (
                   <PharmacyAggregatorView result={verificationResult} />
-                )}
-
-                {activeTab === 'automation' && (
-                  <AutomationAndSchemaView
-                    result={verificationResult}
-                    language={language}
-                    onLanguageChange={setLanguage}
-                    defaultPhone={currentUser?.phone}
-                  />
                 )}
               </>
             )}

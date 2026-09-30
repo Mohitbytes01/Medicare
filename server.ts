@@ -1710,6 +1710,471 @@ app.post('/api/automation/trigger', async (req: Request, res: Response) => {
 });
 
 // ============================================================================
+// WHATSAPP BUSINESS BOT CHANNEL (ZERO-FRICTION VLM + AUDIO NOTE + BUY LINK)
+// ============================================================================
+interface WhatsAppBotExchange {
+  id: string;
+  timestamp: string;
+  senderPhone: string;
+  language: 'en' | 'bn' | 'hi';
+  patientName: string;
+  doctorName: string;
+  voiceNoteScript: string;
+  audioDataUrl?: string | null;
+  whatsappTextReply: string;
+  bestPharmacyName: string;
+  bestPharmacyTotal: number;
+  mrpTotal: number;
+  savingsAmount: number;
+  primaryPurchaseUrl: string;
+  metaApiDelivered?: boolean;
+  medicineLinks: Array<{
+    name: string;
+    dosage: string;
+    timingLabel: string;
+    instruction: string;
+    price: number;
+    buyUrl: string;
+  }>;
+}
+
+const whatsappBotHistory: WhatsAppBotExchange[] = [];
+
+app.get('/api/whatsapp/config-status', (req: Request, res: Response) => {
+  const baseUrl = (
+    process.env.APP_URL ||
+    `${req.protocol}://${req.get('host') || 'localhost:3000'}`
+  ).replace(/\/$/, '');
+
+  res.json({
+    webhookCallbackUrl: `${baseUrl}/api/whatsapp/webhook`,
+    verifyToken: process.env.WHATSAPP_VERIFY_TOKEN || 'verimed_whatsapp_verify_2026',
+    metaCloudConfigured: Boolean(
+      process.env.WHATSAPP_ACCESS_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID
+    ),
+    botDisplayNumber: process.env.VITE_WHATSAPP_BOT_NUMBER || '+1 555 092 8471',
+  });
+});
+
+// Official Meta WhatsApp Cloud API Webhook Verification Endpoint
+app.get('/api/whatsapp/webhook', (req: Request, res: Response) => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+  const expectedToken =
+    process.env.WHATSAPP_VERIFY_TOKEN || 'verimed_whatsapp_verify_2026';
+
+  if (mode === 'subscribe' && token === expectedToken) {
+    res.status(200).send(String(challenge || ''));
+    return;
+  }
+  res.status(403).json({ error: 'Invalid Meta webhook verify token' });
+});
+
+app.get('/api/whatsapp/messages', (_req: Request, res: Response) => {
+  res.json({ messages: whatsappBotHistory.slice(0, 15) });
+});
+
+async function sendMetaCloudWhatsAppMessage(
+  toPhone: string,
+  textBody: string,
+  overridePhoneNumberId?: string
+): Promise<boolean> {
+  const accessToken = (process.env.WHATSAPP_ACCESS_TOKEN || '').trim();
+  const phoneNumberId = (
+    overridePhoneNumberId ||
+    process.env.WHATSAPP_PHONE_NUMBER_ID ||
+    ''
+  ).trim();
+
+  if (!accessToken || !phoneNumberId) return false;
+
+  const cleanTo = toPhone.replace(/[^0-9]/g, '');
+  if (!cleanTo) return false;
+
+  try {
+    const graphRes = await fetch(
+      `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: cleanTo,
+          type: 'text',
+          text: {
+            preview_url: true,
+            body: textBody,
+          },
+        }),
+      }
+    );
+    return graphRes.ok;
+  } catch {
+    return false;
+  }
+}
+
+app.post('/api/whatsapp/webhook', async (req: Request, res: Response) => {
+  try {
+    // Handle Official Meta Cloud API Incoming Webhook Payload
+    if (req.body?.object === 'whatsapp_business_account') {
+      const entry = req.body.entry?.[0];
+      const changeValue = entry?.changes?.[0]?.value;
+      const incomingMsg = changeValue?.messages?.[0];
+      const incomingPhoneNumberId = changeValue?.metadata?.phone_number_id;
+
+      if (!incomingMsg) {
+        res.status(200).send('EVENT_RECEIVED');
+        return;
+      }
+
+      const fromPhone = `+${String(incomingMsg.from || '').replace(/[^0-9]/g, '')}`;
+      const captionOrText =
+        incomingMsg.image?.caption || incomingMsg.text?.body || '';
+      const detectedLang: 'en' | 'bn' | 'hi' = /হিন্দি|हिन्दी|hindi|hi\b/i.test(
+        captionOrText
+      )
+        ? 'hi'
+        : /english|en\b/i.test(captionOrText)
+          ? 'en'
+          : 'bn';
+
+      let downloadedBase64: string | null = null;
+      let downloadedMime = 'image/jpeg';
+
+      if (
+        incomingMsg.type === 'image' &&
+        incomingMsg.image?.id &&
+        process.env.WHATSAPP_ACCESS_TOKEN
+      ) {
+        try {
+          const mediaInfoRes = await fetch(
+            `https://graph.facebook.com/v21.0/${incomingMsg.image.id}`,
+            {
+              headers: {
+                Authorization: `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN.trim()}`,
+              },
+            }
+          );
+          const mediaInfo = (await mediaInfoRes.json()) as {
+            url?: string;
+            mime_type?: string;
+          };
+          if (mediaInfo.url) {
+            const imgRes = await fetch(mediaInfo.url, {
+              headers: {
+                Authorization: `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN.trim()}`,
+              },
+            });
+            const arrayBuf = await imgRes.arrayBuffer();
+            downloadedBase64 = Buffer.from(arrayBuf).toString('base64');
+            downloadedMime = mediaInfo.mime_type || 'image/jpeg';
+          }
+        } catch {
+          downloadedBase64 = null;
+        }
+      }
+
+      if (!downloadedBase64) {
+        await sendMetaCloudWhatsAppMessage(
+          fromPhone,
+          '👋 Welcome to *VeriMed WhatsApp Bot*!\nPlease send a *photo of your doctor’s prescription* (add caption "Bengali" or "Hindi") to receive an instant spoken schedule and lowest-price medicine buy link.',
+          incomingPhoneNumberId
+        );
+        res.status(200).send('EVENT_RECEIVED');
+        return;
+      }
+
+      // Fall through to VLM + TTS processing using downloadedBase64
+      req.body = {
+        senderPhone: fromPhone,
+        language: detectedLang,
+        imageBase64: downloadedBase64,
+        mimeType: downloadedMime,
+        incomingPhoneNumberId,
+        isMetaWebhookEvent: true,
+      };
+    }
+
+    const {
+      senderPhone = '+91 98301 44820',
+      language = 'bn',
+      imageBase64,
+      mimeType = 'image/jpeg',
+      verificationResult: existingResult,
+      incomingPhoneNumberId,
+      isMetaWebhookEvent = false,
+    } = req.body || {};
+
+    const validLang: 'en' | 'bn' | 'hi' =
+      language === 'bn' || language === 'hi' ? language : 'en';
+    const targetLangLabel =
+      validLang === 'bn'
+        ? 'Bengali (বাংলা script)'
+        : validLang === 'hi'
+          ? 'Hindi (हिन्दी Devanagari script)'
+          : 'English';
+
+    let rxData = existingResult;
+
+    // If a raw prescription photo was sent to the WhatsApp Bot without prior analysis, run Gemini VLM
+    if (!rxData && imageBase64) {
+      const cleanBase64 = String(imageBase64).replace(/^data:[^;]+;base64,/, '');
+      const ai = getGeminiClient();
+      const prompt = `Read this prescription image sent via WhatsApp and return ONLY valid JSON (write "instruction" and "summary" in ${targetLangLabel} ONLY; keep every string under 15 words):
+{
+  "doctorName": "string",
+  "patientName": "string",
+  "prescriptionDate": "string",
+  "medicines": [
+    {
+      "name": "brand name + strength",
+      "genericComposition": "salt name",
+      "dosage": "e.g. 1 Tablet",
+      "frequency": "e.g. 1-0-1",
+      "timing": ["morning","night"],
+      "mealRelation": "After food / Before food",
+      "duration": "e.g. 5 days",
+      "estimatedMrpInr": 120,
+      "instruction": "short instruction in ${targetLangLabel}"
+    }
+  ],
+  "summary": "1 short overall sentence in ${targetLangLabel}"
+}`;
+
+      const contentsPayload = {
+        parts: [
+          { inlineData: { mimeType, data: cleanBase64 } },
+          { text: prompt },
+        ],
+      };
+
+      const callFastVlm = async (modelName: string, extraCfg: Record<string, unknown> = {}) => {
+        const r = await ai.models.generateContent({
+          model: modelName,
+          contents: contentsPayload,
+          config: {
+            responseMimeType: 'application/json',
+            temperature: 0.1,
+            ...extraCfg,
+          },
+        });
+        const parsed = safeParseGeminiJson(r.text || '{}');
+        if (!parsed || !Array.isArray(parsed.medicines)) {
+          throw new Error('Invalid VLM JSON');
+        }
+        return parsed;
+      };
+
+      const parsed = await Promise.any([
+        callFastVlm('gemini-2.5-flash', { thinkingConfig: { thinkingBudget: 0 } }),
+        callFastVlm('gemini-3.1-flash-lite'),
+      ]);
+
+      const enrichedMedicines = (parsed.medicines || []).map(
+        (med: Record<string, any>, idx: number) => {
+          const safeName = String(med.name || `Medicine ${idx + 1}`).trim();
+          const { quotes, janAushadhiPrice } = generatePharmacyQuotes(
+            safeName,
+            med.estimatedMrpInr
+          );
+          const inst =
+            med.instruction ||
+            `Take ${safeName} (${med.dosage || '1 Tablet'}) ${med.mealRelation || 'after food'}.`;
+          return {
+            id: `wa-med-${Date.now()}-${idx}`,
+            name: safeName,
+            genericComposition: med.genericComposition || 'Active Salt',
+            dosage: med.dosage || '1 Tablet',
+            frequency: med.frequency || '1-0-1',
+            timing: Array.isArray(med.timing) && med.timing.length ? med.timing : ['morning'],
+            mealRelation: med.mealRelation || 'After food',
+            duration: med.duration || '5 days',
+            instructions: { en: inst, bn: inst, hi: inst },
+            janAushadhiGenericPrice: janAushadhiPrice,
+            pharmacyQuotes: quotes,
+          };
+        }
+      );
+
+      rxData = {
+        doctorName: parsed.doctorName || 'Prescribing Doctor',
+        patientName: parsed.patientName || 'WhatsApp Patient',
+        prescriptionDate: parsed.prescriptionDate || new Date().toLocaleDateString('en-IN'),
+        medicines: enrichedMedicines,
+        regionalSummary: {
+          en: parsed.summary || 'Follow the medicine schedule below.',
+          bn: parsed.summary || 'অনুগ্রহ করে নিচের নিয়ম অনুযায়ী ওষুধ খান।',
+          hi: parsed.summary || 'कृपया नीचे दिए गए समय के अनुसार दवाएं लें।',
+        },
+        priceSummary: computePriceSummary(enrichedMedicines),
+      };
+    }
+
+    if (!rxData || !Array.isArray(rxData.medicines) || rxData.medicines.length === 0) {
+      res.status(400).json({
+        error: 'Please provide a prescription photo or analyzed prescription to process on WhatsApp.',
+      });
+      return;
+    }
+
+    const meds = rxData.medicines;
+    const priceSummary = rxData.priceSummary || computePriceSummary(meds);
+    const bestStoreName = priceSummary.lowestSinglePharmacyName || 'Netmeds';
+    const bestStoreTotal = Number(priceSummary.lowestSinglePharmacyTotal || 0);
+    const mrpTotal = Number(priceSummary.totalMrp || 0);
+    const savingsAmount = Number(Math.max(0, mrpTotal - bestStoreTotal).toFixed(2));
+
+    const medicineLinks = meds.map((m: Record<string, any>) => {
+      const quotes = Array.isArray(m.pharmacyQuotes) ? m.pharmacyQuotes : [];
+      const matchingQuote =
+        quotes.find((q: { platformName?: string }) => q.platformName === bestStoreName) ||
+        quotes[0];
+      const inst =
+        m.instructions?.[validLang] ||
+        m.instructions?.en ||
+        `${m.name} (${m.dosage})`;
+      const timingArr = Array.isArray(m.timing) ? m.timing : ['morning'];
+
+      return {
+        name: m.name,
+        dosage: m.dosage || '1 Tablet',
+        timingLabel: timingArr.map((t: string) => t.toUpperCase()).join(' + '),
+        instruction: inst,
+        price: Number(matchingQuote?.discountedPrice || 0),
+        buyUrl: matchingQuote?.deepLink || 'https://www.netmeds.com/prescriptions',
+      };
+    });
+
+    const primaryPurchaseUrl =
+      medicineLinks[0]?.buyUrl || 'https://www.netmeds.com/prescriptions';
+
+    // Build natural spoken Voice Note script in Bengali, Hindi, or English
+    const medSpokenLines = medicineLinks
+      .map((m: { name: string; instruction: string }, idx: number) => `${idx + 1}. ${m.instruction}`)
+      .join(' ');
+
+    const voiceNoteScript =
+      validLang === 'bn'
+        ? `নমস্কার ${rxData.patientName || ''}। ভেরিমেড হোয়াটসঅ্যাপ সেবায় আপনার প্রেসক্রিপশন যাচাই করা হয়েছে। ডাক্তার ${rxData.doctorName}-এর পরামর্শ অনুযায়ী আপনার ওষুধের নিয়ম শুনুন: ${medSpokenLines} সব ওষুধ একসাথে ${bestStoreName} থেকে কিনলে মোট খরচ হবে ${bestStoreTotal.toFixed(0)} টাকা এবং আপনার সাশ্রয় হবে ${savingsAmount.toFixed(0)} টাকা। নিচের লিঙ্কে ট্যাপ করে ওষুধ অর্ডার করুন।`
+        : validLang === 'hi'
+          ? `नमस्ते ${rxData.patientName || ''}। वेरीमेड व्हाट्सएप सेवा पर आपकी पर्ची की जांच हो गई है। डॉक्टर ${rxData.doctorName} के अनुसार आपकी दवाओं का समय इस प्रकार है: ${medSpokenLines} ये सभी दवाएं ${bestStoreName} से एक साथ मंगाने पर कुल बिल ${bestStoreTotal.toFixed(0)} रुपये होगा और आपकी ${savingsAmount.toFixed(0)} रुपये की बचत होगी। नीचे दिए गए लिंक पर टैप करके दवा ऑर्डर करें।`
+          : `Hello ${rxData.patientName || ''}. Your prescription from ${rxData.doctorName} has been verified by VeriMed WhatsApp Care. Here is your daily medicine schedule: ${medSpokenLines} Ordering all medicines together on ${bestStoreName} costs ${bestStoreTotal.toFixed(0)} rupees, saving you ${savingsAmount.toFixed(0)} rupees off MRP. Tap the purchase link below to order.`;
+
+    // Format WhatsApp text message reply with schedule + purchase link
+    const whatsappTextReply = [
+      `*VeriMed WhatsApp Bot (${validLang === 'bn' ? 'বাংলা' : validLang === 'hi' ? 'हिन्दी' : 'English'})*`,
+      `👨‍⚕️ Dr. ${rxData.doctorName} | 👤 ${rxData.patientName}`,
+      ``,
+      ...medicineLinks.map(
+        (m: { name: string; timingLabel: string; instruction: string; price: number }, i: number) =>
+          `*${i + 1}. ${m.name}* [${m.timingLabel}]\n   ${m.instruction} (₹${m.price.toFixed(0)})`
+      ),
+      ``,
+      `💊 *Lowest Full Bill (${bestStoreName}): ₹${bestStoreTotal.toFixed(2)}* (Save ₹${savingsAmount.toFixed(2)} off MRP)`,
+      `🛒 *1-Click Buy Link:* ${primaryPurchaseUrl}`,
+    ].join('\n');
+
+    // Attempt fast Gemini TTS voice note generation (max 2.5s timeout so webhook stays snappy)
+    let audioDataUrl: string | null = null;
+    try {
+      const ai = getGeminiClient();
+      const ttsPromise = ai.models
+        .generateContent({
+          model: 'gemini-3.8-flash-lite-tts',
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                {
+                  text: voiceNoteScript,
+                  speechMetadata: {
+                    style:
+                      validLang === 'bn'
+                        ? 'Warm, reassuring Bengali pharmacist speaking clearly for an elderly patient'
+                        : validLang === 'hi'
+                          ? 'Warm, reassuring Hindi pharmacist speaking clearly for an elderly patient'
+                          : 'Warm, reassuring clinical pharmacist speaking clearly',
+                  },
+                } as unknown as { text: string },
+              ],
+            },
+          ],
+          config: {
+            responseModalities: ['AUDIO'],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: { voiceName: 'Kore' },
+              },
+            },
+          },
+        })
+        .then((r) => {
+          const b64 = r.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+          return b64 ? `data:audio/wav;base64,${b64}` : null;
+        });
+
+      audioDataUrl = await Promise.race([
+        ttsPromise,
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500)),
+      ]);
+    } catch {
+      audioDataUrl = null;
+    }
+
+    const metaDelivered = await sendMetaCloudWhatsAppMessage(
+      String(senderPhone),
+      `${whatsappTextReply}\n\n🔊 *Spoken Summary:* ${voiceNoteScript}`,
+      incomingPhoneNumberId
+    );
+
+    const exchange: WhatsAppBotExchange = {
+      id: `WA-${Math.floor(10000 + Math.random() * 90000)}`,
+      timestamp: new Date().toLocaleTimeString('en-IN', {
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+      senderPhone: String(senderPhone),
+      language: validLang,
+      patientName: rxData.patientName || 'Patient',
+      doctorName: rxData.doctorName || 'Doctor',
+      voiceNoteScript,
+      audioDataUrl,
+      whatsappTextReply,
+      bestPharmacyName: bestStoreName,
+      bestPharmacyTotal: bestStoreTotal,
+      mrpTotal,
+      savingsAmount,
+      primaryPurchaseUrl,
+      metaApiDelivered: metaDelivered,
+      medicineLinks,
+    };
+
+    whatsappBotHistory.unshift(exchange);
+
+    if (isMetaWebhookEvent) {
+      res.status(200).send('EVENT_RECEIVED');
+      return;
+    }
+
+    res.json({
+      success: true,
+      exchange,
+      updatedPrescriptionResult: rxData,
+      messages: whatsappBotHistory.slice(0, 15),
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'WhatsApp Bot processing failed';
+    res.status(500).json({ error: message });
+  }
+});
+
+// ============================================================================
 // SEAMLESS ONE-CLICK PHARMACY BUNDLE CHECKOUT ENDPOINTS
 // ============================================================================
 const PHARMACY_ORDERS_PATH = path.join(DATA_DIR, 'pharmacy-orders.json');
