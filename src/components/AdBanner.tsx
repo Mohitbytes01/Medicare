@@ -36,7 +36,22 @@ export const AdBanner: React.FC<AdBannerProps> = ({
           ?.VITE_ADSENSE_SLOT_HORIZONTAL || '0987654321';
 
   useEffect(() => {
-    if (!adsenseClientId || dismissed) return;
+    if (dismissed) return;
+
+    // Load Adsterra Native Banner (#3) when horizontal banner is mounted
+    if (variant === 'horizontal') {
+      const nativeSrc =
+        'https://bauval.org/21/1974d1c2b5413f77ab4437a704477cd2';
+      if (!document.querySelector(`script[src="${nativeSrc}"]`)) {
+        const nativeScript = document.createElement('script');
+        nativeScript.async = true;
+        nativeScript.setAttribute('data-cfasync', 'false');
+        nativeScript.src = nativeSrc;
+        document.body.appendChild(nativeScript);
+      }
+    }
+
+    if (!adsenseClientId) return;
 
     const existingScript = document.querySelector(
       'script[src*="pagead2.googlesyndication.com"]'
@@ -56,7 +71,7 @@ export const AdBanner: React.FC<AdBannerProps> = ({
     } catch {
       // Ignore AdSense push warnings during initial mount
     }
-  }, [adsenseClientId, dismissed]);
+  }, [adsenseClientId, dismissed, variant]);
 
   if (dismissed) return null;
 
@@ -141,6 +156,8 @@ export const AdBanner: React.FC<AdBannerProps> = ({
     );
   }
 
+  const adsterra300x250SrcDoc = `<!DOCTYPE html><html><head><style>body{margin:0;padding:0;display:flex;justify-content:center;align-items:center;background:transparent;overflow:hidden;}</style></head><body><script type="text/javascript">atOptions={'key':'08b428238a3eeb25bd294271cb352020','format':'iframe','height':250,'width':300,'params':{}};</script><script type="text/javascript" src="https://bauval.org/22/08b428238a3eeb25bd294271cb352020"></script></body></html>`;
+
   if (variant === 'sidebar') {
     return (
       <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-2.5">
@@ -156,6 +173,17 @@ export const AdBanner: React.FC<AdBannerProps> = ({
           >
             <X className="w-3.5 h-3.5" />
           </button>
+        </div>
+
+        <div className="flex justify-center overflow-hidden rounded-xl bg-slate-50 border border-slate-100">
+          <iframe
+            title="Sponsored Partner Display"
+            srcDoc={adsterra300x250SrcDoc}
+            width={300}
+            height={250}
+            scrolling="no"
+            className="border-0 max-w-full"
+          />
         </div>
 
         <div className="space-y-1">
@@ -192,53 +220,58 @@ export const AdBanner: React.FC<AdBannerProps> = ({
   }
 
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-      <div className="flex items-start gap-3.5 min-w-0">
-        <div className="w-9 h-9 rounded-xl bg-teal-50 border border-teal-200 text-teal-700 flex items-center justify-center shrink-0 mt-0.5">
-          <HeartPulse className="w-4 h-4" />
-        </div>
-        <div className="space-y-0.5 min-w-0">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-            {contextualOffer.partner}
+    <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 space-y-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-start gap-3.5 min-w-0">
+          <div className="w-9 h-9 rounded-xl bg-teal-50 border border-teal-200 text-teal-700 flex items-center justify-center shrink-0 mt-0.5">
+            <HeartPulse className="w-4 h-4" />
           </div>
-          <h3 className="text-sm font-bold text-slate-900">
-            {contextualOffer.title}
-          </h3>
-          <p className="text-xs text-slate-600 leading-relaxed">
-            {contextualOffer.subtitle}
-          </p>
+          <div className="space-y-0.5 min-w-0">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              {contextualOffer.partner}
+            </div>
+            <h3 className="text-sm font-bold text-slate-900">
+              {contextualOffer.title}
+            </h3>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              {contextualOffer.subtitle}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3 self-end sm:self-center shrink-0">
+          <div className="text-right">
+            <div className="font-mono text-base font-bold text-teal-800">
+              {contextualOffer.price}
+            </div>
+            <div className="font-mono text-[11px] text-slate-400 line-through">
+              MRP {contextualOffer.mrp}
+            </div>
+          </div>
+
+          <a
+            href={contextualOffer.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="min-h-[38px] px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
+          >
+            <span>{contextualOffer.cta}</span>
+            <ExternalLink className="w-3.5 h-3.5" />
+          </a>
+
+          <button
+            type="button"
+            onClick={() => setDismissed(true)}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 cursor-pointer"
+            aria-label="Dismiss sponsored banner"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
       </div>
 
-      <div className="flex items-center gap-3 self-end sm:self-center shrink-0">
-        <div className="text-right">
-          <div className="font-mono text-base font-bold text-teal-800">
-            {contextualOffer.price}
-          </div>
-          <div className="font-mono text-[11px] text-slate-400 line-through">
-            MRP {contextualOffer.mrp}
-          </div>
-        </div>
-
-        <a
-          href={contextualOffer.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="min-h-[38px] px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
-        >
-          <span>{contextualOffer.cta}</span>
-          <ExternalLink className="w-3.5 h-3.5" />
-        </a>
-
-        <button
-          type="button"
-          onClick={() => setDismissed(true)}
-          className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 cursor-pointer"
-          aria-label="Dismiss sponsored banner"
-        >
-          <X className="w-4 h-4" />
-        </button>
-      </div>
+      {/* Adsterra Native Banner (#3) */}
+      <div id="container-1974d1c2b5413f77ab4437a704477cd2" />
     </div>
   );
 };

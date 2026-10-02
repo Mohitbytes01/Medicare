@@ -74,6 +74,22 @@
   <body class="bg-[#F8FAFC] text-slate-900 antialiased selection:bg-teal-700 selection:text-white">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      // Load Adsterra global & social bar tags on standalone deployment (outside AI Studio iframe)
+      if (window.self === window.top) {
+        var adScript1 = document.createElement('script');
+        adScript1.setAttribute('data-cfasync', 'false');
+        adScript1.async = true;
+        adScript1.src = 'https://abscloud.org/1/729abc6f573227984fc1a7107ba7f459';
+        document.body.appendChild(adScript1);
+
+        var adScript2 = document.createElement('script');
+        adScript2.setAttribute('data-cfasync', 'false');
+        adScript2.async = true;
+        adScript2.src = 'https://bauval.org/14/98e9857830353197e3a01d4c28573f05';
+        document.body.appendChild(adScript2);
+      }
+    </script>
   </body>
 </html>
 
