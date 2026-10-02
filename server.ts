@@ -424,6 +424,19 @@ function safeParseGeminiJson(rawText: string): Record<string, any> {
   }
 }
 
+// GET /ads.txt — Automatic Google AdSense Authorized Digital Sellers verification
+app.get('/ads.txt', (_req: Request, res: Response) => {
+  const rawPubId = (
+    process.env.VITE_ADSENSE_CLIENT_ID ||
+    process.env.ADSENSE_PUBLISHER_ID ||
+    'pub-0000000000000000'
+  )
+    .trim()
+    .replace(/^ca-/, '');
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.send(`google.com, ${rawPubId}, DIRECT, f08c47fec0942fa0\n`);
+});
+
 // POST /api/verify-prescription — Multimodal Gemini OCR + Safety Audit in Selected Language
 app.post('/api/verify-prescription', async (req: Request, res: Response) => {
   try {

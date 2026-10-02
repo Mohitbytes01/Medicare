@@ -23,6 +23,11 @@ export const AdBanner: React.FC<AdBannerProps> = ({
     (import.meta as unknown as { env?: Record<string, string> }).env
       ?.VITE_ADSENSE_CLIENT_ID || ''
   ).trim();
+  const adsterraSmartlinkUrl = (
+    (import.meta as unknown as { env?: Record<string, string> }).env
+      ?.VITE_ADSTERRA_SMARTLINK_URL ||
+    'https://asiafilm.org/4/1aa8f7a6481d1f8762a00d2cfe07f570'
+  ).trim();
   const adsenseSlot =
     variant === 'sidebar'
       ? (import.meta as unknown as { env?: Record<string, string> }).env
@@ -79,35 +84,35 @@ export const AdBanner: React.FC<AdBannerProps> = ({
 
   const contextualOffer = isDiabetesRx
     ? {
-        partner: 'Tata 1mg Labs · Sponsored Health Checkup',
-        title: 'HbA1c + Fasting Blood Sugar Home Test Package',
+        partner: 'Sponsored Partner Offer · Health & Wellness',
+        title: 'HbA1c + Fasting Blood Sugar Home Checkup Offer',
         subtitle:
-          'Recommended for patients taking daily diabetes medicines. Free doorstep sample collection & NABL-certified report.',
+          'Recommended for patients taking daily diabetes medicines. View today’s special partner offer & discount.',
         price: '₹299',
         mrp: '₹750',
-        cta: 'Book Home Test',
-        url: 'https://www.1mg.com/labs?utm_source=verimed_app&utm_medium=contextual_ad',
+        cta: 'View Special Offer',
+        url: adsterraSmartlinkUrl,
       }
     : isCardiacRx
       ? {
-          partner: 'Apollo 24|7 Diagnostics · Sponsored Health Checkup',
-          title: 'Complete Heart & Lipid Profile Blood Test (Home Pickup)',
+          partner: 'Sponsored Partner Offer · Heart & Wellness',
+          title: 'Complete Heart & Lipid Profile Checkup Offer',
           subtitle:
-            'Recommended for blood pressure & cholesterol regimens. Includes Total Cholesterol, Triglycerides, HDL/LDL & ECG.',
+            'Recommended for blood pressure & cholesterol regimens. View today’s special partner offer & discount.',
           price: '₹499',
           mrp: '₹1,200',
-          cta: 'Book Heart Checkup',
-          url: 'https://www.apollo247.com/lab-tests?utm_source=verimed_app&utm_medium=contextual_ad',
+          cta: 'View Special Offer',
+          url: adsterraSmartlinkUrl,
         }
       : {
-          partner: 'Tata 1mg & Thyrocare · Sponsored Senior Care Offer',
-          title: 'Full Body Senior Citizen Health Checkup (65+ Tests at Home)',
+          partner: 'Sponsored Advertisement · Special Partner Offer',
+          title: 'Full Body Health & Wellness Partner Offer',
           subtitle:
-            'Includes Blood Sugar, Kidney, Liver, Thyroid & Vitamin D/B12 screening with free home sample collection.',
-          price: '₹599',
-          mrp: '₹1,499',
-          cta: 'View Partner Offer',
-          url: 'https://www.1mg.com/labs?utm_source=verimed_app&utm_medium=sponsored_banner',
+            'Tap below to view today’s sponsored partner promotion and exclusive user deals.',
+          price: 'Special',
+          mrp: 'Deal',
+          cta: 'Open Offer',
+          url: adsterraSmartlinkUrl,
         };
 
   if (adsenseClientId) {
