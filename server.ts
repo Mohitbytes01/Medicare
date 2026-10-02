@@ -10,7 +10,62 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+app.disable('x-powered-by');
 app.use(express.json({ limit: '25mb' }));
+
+// Production HTTP Security Headers
+app.use((_req: Request, res: Response, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=()');
+  next();
+});
+
+// Sliding-Window IP Rate Limiter for Auth & AI Endpoints
+const ipRateLimits = new Map<string, { count: number; resetAt: number }>();
+function checkRateLimit(ip: string, bucket: string, maxRequests: number, windowMs: number): boolean {
+  const now = Date.now();
+  const key = `${bucket}:${ip}`;
+  const entry = ipRateLimits.get(key);
+  if (!entry || now > entry.resetAt) {
+    ipRateLimits.set(key, { count: 1, resetAt: now + windowMs });
+    return true;
+  }
+  if (entry.count >= maxRequests) {
+    return false;
+  }
+  entry.count += 1;
+  return true;
+}
+
+app.use('/api/auth', (req: Request, res: Response, next) => {
+  const clientIp = req.ip || req.socket.remoteAddress || 'local';
+  if (!checkRateLimit(clientIp, 'auth', 30, 60_000)) {
+    res.status(429).json({ error: 'Too many authentication attempts. Please wait 1 minute.' });
+    return;
+  }
+  next();
+});
+
+app.use('/api/verify-prescription', (req: Request, res: Response, next) => {
+  const clientIp = req.ip || req.socket.remoteAddress || 'local';
+  if (!checkRateLimit(clientIp, 'scan', 25, 60_000)) {
+    res.status(429).json({ error: 'Rate limit reached. Please wait a moment before scanning again.' });
+    return;
+  }
+  next();
+});
+
+// Production Health Check Endpoint for Cloud Run / Render / Railway
+app.get('/api/health', (_req: Request, res: Response) => {
+  res.status(200).json({
+    status: 'ok',
+    service: 'VeriMed Clinical Server',
+    uptimeSeconds: Math.floor(process.uptime()),
+    timestamp: new Date().toISOString(),
+  });
+});
 
 // Persistent Server-Side User & Session Store
 interface StoredUser {
@@ -170,6 +225,8 @@ function generatePharmacyQuotes(medName: string, providedMrp?: number) {
     .replace(/\s+/g, ' ')
     .trim();
   const encoded = encodeURIComponent(cleanQueryName || medName.trim());
+  const affTag = (process.env.PHARMACY_AFFILIATE_TAG || 'verimed_partner').trim();
+  const affSuffix = `&utm_source=verimed&aff_id=${encodeURIComponent(affTag)}`;
 
   const rawQuotes = [
     {
@@ -181,7 +238,7 @@ function generatePharmacyQuotes(medName: string, providedMrp?: number) {
       packSize,
       stockStatus: 'In Stock' as const,
       isLowestPrice: false,
-      deepLink: `https://www.1mg.com/search/all?name=${encoded}`,
+      deepLink: `https://www.1mg.com/search/all?name=${encoded}${affSuffix}`,
     },
     {
       platformId: 'pharmeasy' as const,
@@ -192,7 +249,7 @@ function generatePharmacyQuotes(medName: string, providedMrp?: number) {
       packSize,
       stockStatus: 'In Stock' as const,
       isLowestPrice: false,
-      deepLink: `https://pharmeasy.in/search/all?name=${encoded}`,
+      deepLink: `https://pharmeasy.in/search/all?name=${encoded}${affSuffix}`,
     },
     {
       platformId: 'netmeds' as const,
@@ -203,7 +260,7 @@ function generatePharmacyQuotes(medName: string, providedMrp?: number) {
       packSize,
       stockStatus: (hash % 7 === 0 ? 'Limited Stock' : 'In Stock') as 'In Stock' | 'Limited Stock',
       isLowestPrice: false,
-      deepLink: `https://www.netmeds.com/products?q=${encoded}`,
+      deepLink: `https://www.netmeds.com/products?q=${encoded}${affSuffix}`,
     },
     {
       platformId: 'apollo' as const,
@@ -214,7 +271,7 @@ function generatePharmacyQuotes(medName: string, providedMrp?: number) {
       packSize,
       stockStatus: 'Express 2hr' as const,
       isLowestPrice: false,
-      deepLink: `https://www.apollopharmacy.in/search-medicines/${encoded}`,
+      deepLink: `https://www.apollopharmacy.in/search-medicines/${encoded}?utm_source=verimed&aff_id=${encodeURIComponent(affTag)}`,
     },
   ];
 
@@ -1175,6 +1232,43 @@ app.post('/api/auth/logout', (req: Request, res: Response) => {
     }
   }
   res.json({ ok: true });
+});
+
+// PUT /api/auth/profile — Update user profile (name, phone, preferredLanguage)
+app.put('/api/auth/profile', (req: Request, res: Response) => {
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+  const { name, phone, preferredLanguage } = req.body || {};
+
+  if (!token) {
+    res.status(401).json({ error: 'Not signed in' });
+    return;
+  }
+
+  const store = loadAuthStore();
+  const userId = store.sessions[token];
+  const user = store.users.find((u) => u.id === userId);
+  if (!user) {
+    res.status(404).json({ error: 'Account not found' });
+    return;
+  }
+
+  if (name && String(name).trim().length >= 2) {
+    user.name = String(name).trim().slice(0, 120);
+  }
+  if (typeof phone === 'string') {
+    user.phone = phone.trim().slice(0, 32);
+  }
+  if (
+    preferredLanguage === 'en' ||
+    preferredLanguage === 'bn' ||
+    preferredLanguage === 'hi'
+  ) {
+    user.preferredLanguage = preferredLanguage;
+  }
+
+  saveAuthStore(store);
+  res.json({ user: sanitizeUser(user) });
 });
 
 
@@ -2293,7 +2387,7 @@ app.post('/api/pharmacy/checkout', (req: Request, res: Response) => {
 });
 
 async function startServer() {
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');

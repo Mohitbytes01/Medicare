@@ -6,12 +6,14 @@ import { VeriMedLogo } from './VeriMedLogo';
 
 interface AuthViewProps {
   initialMode?: 'signin' | 'register';
+  reasonMessage?: string | null;
   onAuthSuccess: (user: AuthUser, token: string) => void;
   onContinueAsGuest?: () => void;
 }
 
 export const AuthView: React.FC<AuthViewProps> = ({
   initialMode = 'signin',
+  reasonMessage,
   onAuthSuccess,
   onContinueAsGuest,
 }) => {
@@ -139,6 +141,12 @@ export const AuthView: React.FC<AuthViewProps> = ({
 
       {/* Right Column: Clean Sign In / Register Card */}
       <div className="lg:col-span-6 bg-white border border-slate-200 rounded-2xl p-6 sm:p-8">
+        {reasonMessage && (
+          <div className="mb-5 p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs font-bold text-amber-950">
+            {reasonMessage}
+          </div>
+        )}
+
         {/* Mode Switcher Tabs */}
         <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-xl mb-6">
           <button

@@ -13,6 +13,7 @@ import {
   getFirestore,
   serverTimestamp,
   setDoc,
+  updateDoc,
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 import { AuthUser, SupportedLanguage } from './types/prescription';
@@ -162,6 +163,37 @@ export async function signInWithGoogle(
   const provider = new GoogleAuthProvider();
   const credential = await signInWithPopup(auth, provider);
   return syncFirebaseUserProfile(credential.user, preferredLanguage);
+}
+
+export async function updateFirebaseUserProfile(
+  uid: string,
+  updates: {
+    name: string;
+    phone: string;
+    preferredLanguage: SupportedLanguage;
+  }
+): Promise<void> {
+  const safeUid = uid.slice(0, USER_PROFILE_CONSTRAINTS.UID_MAX_LENGTH);
+  const profilePath = `users/${safeUid}/private/profile`;
+  const profileRef = doc(db, 'users', safeUid, 'private', 'profile');
+
+  const safeName = updates.name
+    .trim()
+    .slice(0, USER_PROFILE_CONSTRAINTS.NAME_MAX_LENGTH);
+  const safePhone = updates.phone
+    .trim()
+    .slice(0, USER_PROFILE_CONSTRAINTS.PHONE_MAX_LENGTH);
+
+  try {
+    await updateDoc(profileRef, {
+      name: safeName || 'Patient',
+      phone: safePhone,
+      preferredLanguage: updates.preferredLanguage,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, profilePath);
+  }
 }
 
 export async function signOutFromFirebase(): Promise<void> {

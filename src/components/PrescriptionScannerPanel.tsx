@@ -47,6 +47,8 @@ interface PrescriptionScannerPanelProps {
   scanError: string | null;
   onUploadFile: (file: File) => void;
   onRunLiveGeminiScan: () => void;
+  isAuthenticated?: boolean;
+  onRequireSignIn?: () => void;
 }
 
 export const PrescriptionScannerPanel: React.FC<PrescriptionScannerPanelProps> = ({
@@ -58,6 +60,8 @@ export const PrescriptionScannerPanel: React.FC<PrescriptionScannerPanelProps> =
   scanError,
   onUploadFile,
   onRunLiveGeminiScan,
+  isAuthenticated = true,
+  onRequireSignIn,
 }) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
@@ -93,6 +97,11 @@ export const PrescriptionScannerPanel: React.FC<PrescriptionScannerPanelProps> =
     LANGUAGE_OPTIONS.find((l) => l.id === language)?.label || 'English';
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!isAuthenticated && onRequireSignIn) {
+      e.target.value = '';
+      onRequireSignIn();
+      return;
+    }
     const file = e.target.files?.[0];
     if (file) {
       onUploadFile(file);
@@ -102,6 +111,10 @@ export const PrescriptionScannerPanel: React.FC<PrescriptionScannerPanelProps> =
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
+    if (!isAuthenticated && onRequireSignIn) {
+      onRequireSignIn();
+      return;
+    }
     const file = e.dataTransfer.files?.[0];
     if (file) {
       onUploadFile(file);
@@ -116,7 +129,9 @@ export const PrescriptionScannerPanel: React.FC<PrescriptionScannerPanelProps> =
           Your Prescription Photo
         </h2>
         <p className="mt-1 text-xs text-slate-600">
-          1. Upload photo · 2. Select language from dropdown · 3. Tap Analyze
+          {isAuthenticated
+            ? '1. Upload photo · 2. Select language from dropdown · 3. Tap Analyze'
+            : 'Please Sign In first to upload and analyze your prescription photo'}
         </p>
       </div>
 
@@ -140,7 +155,13 @@ export const PrescriptionScannerPanel: React.FC<PrescriptionScannerPanelProps> =
 
         <button
           type="button"
-          onClick={() => fileInputRef.current?.click()}
+          onClick={() => {
+            if (!isAuthenticated && onRequireSignIn) {
+              onRequireSignIn();
+              return;
+            }
+            fileInputRef.current?.click();
+          }}
           className="min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-semibold transition-colors flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer"
         >
           <Upload className="w-4 h-4 text-teal-700 shrink-0" />
@@ -149,7 +170,13 @@ export const PrescriptionScannerPanel: React.FC<PrescriptionScannerPanelProps> =
 
         <button
           type="button"
-          onClick={() => cameraInputRef.current?.click()}
+          onClick={() => {
+            if (!isAuthenticated && onRequireSignIn) {
+              onRequireSignIn();
+              return;
+            }
+            cameraInputRef.current?.click();
+          }}
           className="min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-xs font-semibold text-slate-800 hover:bg-slate-50 transition-colors flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer"
         >
           <Camera className="w-4 h-4 text-teal-700 shrink-0" />
@@ -184,8 +211,14 @@ export const PrescriptionScannerPanel: React.FC<PrescriptionScannerPanelProps> =
 
         <button
           type="button"
-          disabled={!previewDataUrl || isScanning}
-          onClick={onRunLiveGeminiScan}
+          disabled={(isAuthenticated && !previewDataUrl) || isScanning}
+          onClick={() => {
+            if (!isAuthenticated && onRequireSignIn) {
+              onRequireSignIn();
+              return;
+            }
+            onRunLiveGeminiScan();
+          }}
           className="w-full min-h-[46px] px-4 py-2.5 rounded-xl bg-teal-700 hover:bg-teal-800 disabled:bg-slate-300 disabled:text-slate-500 text-white text-xs font-bold transition-colors flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap shadow-xs"
         >
           {isScanning ? (
@@ -199,9 +232,11 @@ export const PrescriptionScannerPanel: React.FC<PrescriptionScannerPanelProps> =
             <>
               <Sparkles className="w-4 h-4 shrink-0" />
               <span>
-                {previewDataUrl
-                  ? `Analyze Prescription in ${selectedLanguageLabel}`
-                  : 'Upload a Photo First to Analyze'}
+                {!isAuthenticated
+                  ? 'Sign In to Upload & Analyze Prescription'
+                  : previewDataUrl
+                    ? `Analyze Prescription in ${selectedLanguageLabel}`
+                    : 'Upload a Photo First to Analyze'}
               </span>
             </>
           )}
@@ -248,7 +283,18 @@ export const PrescriptionScannerPanel: React.FC<PrescriptionScannerPanelProps> =
         <div
           onDragOver={(e) => e.preventDefault()}
           onDrop={handleDrop}
-          className="relative h-[280px] overflow-auto flex items-start justify-center p-3 bg-slate-100"
+          onClick={() => {
+            if (!previewDataUrl) {
+              if (!isAuthenticated && onRequireSignIn) {
+                onRequireSignIn();
+                return;
+              }
+              fileInputRef.current?.click();
+            }
+          }}
+          className={`relative h-[280px] overflow-auto flex items-start justify-center p-3 bg-slate-100 ${
+            !previewDataUrl ? 'cursor-pointer hover:bg-slate-200/60 transition-colors' : ''
+          }`}
         >
           {previewDataUrl ? (
             <img
