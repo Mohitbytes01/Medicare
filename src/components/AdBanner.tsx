@@ -17,6 +17,9 @@ export const AdBanner: React.FC<AdBannerProps> = ({
   variant = 'horizontal',
   prescription,
 }) => {
+  const adsEnabled =
+    ((import.meta as unknown as { env?: Record<string, string> }).env
+      ?.VITE_ADS_ENABLED || 'false') === 'true';
   const [dismissed, setDismissed] = useState(false);
 
   const adsenseClientId = (
@@ -36,7 +39,7 @@ export const AdBanner: React.FC<AdBannerProps> = ({
           ?.VITE_ADSENSE_SLOT_HORIZONTAL || '0987654321';
 
   useEffect(() => {
-    if (dismissed) return;
+    if (!adsEnabled || dismissed) return;
 
     // Load Adsterra Native Banner (#3) when horizontal banner is mounted
     if (variant === 'horizontal') {
@@ -71,9 +74,9 @@ export const AdBanner: React.FC<AdBannerProps> = ({
     } catch {
       // Ignore AdSense push warnings during initial mount
     }
-  }, [adsenseClientId, dismissed, variant]);
+  }, [adsEnabled, adsenseClientId, dismissed, variant]);
 
-  if (dismissed) return null;
+  if (!adsEnabled || dismissed) return null;
 
   // Contextual Health / Lab Partner Selection based on scanned medicines
   const medText = (prescription?.medicines || [])
