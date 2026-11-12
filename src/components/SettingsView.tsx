@@ -4,6 +4,8 @@ import {
   CheckCircle2,
   Clock,
   Download,
+  FileText,
+  HeartPulse,
   IndianRupee,
   Languages,
   Loader2,
@@ -11,15 +13,22 @@ import {
   MessageSquare,
   RotateCcw,
   Save,
+  Trash2,
   User,
   Volume2,
 } from 'lucide-react';
 import {
   AuthUser,
   PrescriptionVerificationResult,
+  SavedPrescriptionRecord,
   SupportedLanguage,
 } from '../types/prescription';
-import { auth, updateFirebaseUserProfile } from '../firebase';
+import {
+  auth,
+  deleteSavedPrescriptionFromFirestore,
+  listSavedPrescriptionsFromFirestore,
+  updateFirebaseUserProfile,
+} from '../firebase';
 
 export interface AppSettingsPreferences {
   voiceRate: number;
@@ -87,6 +96,23 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [name, setName] = useState(currentUser?.name || 'Guest Patient');
   const [phone, setPhone] = useState(currentUser?.phone || '+91 ');
   const [email] = useState(currentUser?.identifier || 'Not signed in (Guest session)');
+  const [age, setAge] = useState<string>(
+    currentUser?.age && currentUser.age > 0 ? String(currentUser.age) : ''
+  );
+  const [chronicDiseases, setChronicDiseases] = useState<string>(
+    currentUser?.chronicDiseases || ''
+  );
+  const [knownAllergies, setKnownAllergies] = useState<string>(
+    currentUser?.knownAllergies || ''
+  );
+  const [activeMedicines, setActiveMedicines] = useState<string>(
+    currentUser?.activeMedicines || ''
+  );
+
+  const [savedPrescriptions, setSavedPrescriptions] = useState<
+    SavedPrescriptionRecord[]
+  >([]);
+  const [loadingPrescriptions, setLoadingPrescriptions] = useState(false);
 
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [saveBanner, setSaveBanner] = useState<string | null>(null);
@@ -96,8 +122,36 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     if (currentUser) {
       setName(currentUser.name);
       setPhone(currentUser.phone || '+91 ');
+      setAge(currentUser.age && currentUser.age > 0 ? String(currentUser.age) : '');
+      setChronicDiseases(currentUser.chronicDiseases || '');
+      setKnownAllergies(currentUser.knownAllergies || '');
+      setActiveMedicines(currentUser.activeMedicines || '');
     }
   }, [currentUser]);
+
+  useEffect(() => {
+    if (!auth.currentUser) {
+      setSavedPrescriptions([]);
+      return;
+    }
+    setLoadingPrescriptions(true);
+    listSavedPrescriptionsFromFirestore(auth.currentUser.uid)
+      .then((records) => setSavedPrescriptions(records))
+      .catch(() => {})
+      .finally(() => setLoadingPrescriptions(false));
+  }, [currentUser?.id, verificationResult?.verificationId]);
+
+  const handleDeleteSavedPrescription = async (verificationId: string) => {
+    if (!auth.currentUser) return;
+    try {
+      await deleteSavedPrescriptionFromFirestore(auth.currentUser.uid, verificationId);
+      setSavedPrescriptions((prev) =>
+        prev.filter((r) => r.verificationId !== verificationId)
+      );
+    } catch {
+      // Ignore delete error
+    }
+  };
 
   const handleFieldChange = <K extends keyof AppSettingsPreferences>(
     key: K,
@@ -113,6 +167,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setIsSavingProfile(true);
     setSaveBanner(null);
 
+    const parsedAge = Math.max(0, Math.min(130, Math.round(Number(age) || 0)));
+
     try {
       localStorage.setItem(APP_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
 
@@ -120,12 +176,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         await updateFirebaseUserProfile(auth.currentUser.uid, {
           name,
           phone,
+          age: parsedAge,
+          chronicDiseases,
+          knownAllergies,
+          activeMedicines,
           preferredLanguage: language,
         });
         onUserUpdated({
           ...currentUser,
           name: name.trim() || currentUser.name,
           phone: phone.trim(),
+          age: parsedAge,
+          chronicDiseases: chronicDiseases.trim(),
+          knownAllergies: knownAllergies.trim(),
+          activeMedicines: activeMedicines.trim(),
           preferredLanguage: language,
         });
       } else {
@@ -140,6 +204,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             body: JSON.stringify({
               name,
               phone,
+              age: parsedAge,
+              chronicDiseases,
+              knownAllergies,
+              activeMedicines,
               preferredLanguage: language,
             }),
           });
@@ -152,12 +220,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             ...currentUser,
             name: name.trim(),
             phone: phone.trim(),
+            age: parsedAge,
+            chronicDiseases: chronicDiseases.trim(),
+            knownAllergies: knownAllergies.trim(),
+            activeMedicines: activeMedicines.trim(),
             preferredLanguage: language,
           });
         }
       }
 
-      setSaveBanner('All profile details and app settings have been saved.');
+      setSaveBanner(
+        'Your medical profile (age, diseases, medicines) and settings have been saved to the database.'
+      );
     } catch {
       setSaveBanner('Settings saved locally on this device.');
     } finally {
@@ -306,6 +380,169 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             />
           </div>
         </div>
+
+        {/* Essential Clinical Data Stored in Database */}
+        <div className="pt-4 border-t border-slate-200 space-y-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <HeartPulse className="w-4 h-4 text-teal-700" />
+              <h3 className="text-sm font-bold text-slate-900">
+                Essential Medical Profile (Saved to Database)
+              </h3>
+            </div>
+            <span className="text-[11px] text-slate-500">
+              Only essential clinical details are stored for safety checks
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                Patient Age (Years)
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={130}
+                value={age}
+                onChange={(e) => setAge(e.target.value)}
+                placeholder="e.g. 64"
+                className="w-full min-h-[42px] px-3.5 py-2 rounded-xl border border-slate-300 font-mono text-sm text-slate-900 focus:outline-none focus:border-teal-700"
+              />
+            </div>
+
+            <div className="md:col-span-3">
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                Disease Details / Chronic Conditions
+              </label>
+              <input
+                type="text"
+                maxLength={500}
+                value={chronicDiseases}
+                onChange={(e) => setChronicDiseases(e.target.value)}
+                placeholder="e.g. Type 2 Diabetes, High Blood Pressure (Hypertension), Thyroid"
+                className="w-full min-h-[42px] px-3.5 py-2 rounded-xl border border-slate-300 text-sm text-slate-900 focus:outline-none focus:border-teal-700"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                Ongoing Daily Medicines
+              </label>
+              <input
+                type="text"
+                maxLength={600}
+                value={activeMedicines}
+                onChange={(e) => setActiveMedicines(e.target.value)}
+                placeholder="e.g. Glycomet-GP 1, Telma 40, Ecosprin 75"
+                className="w-full min-h-[42px] px-3.5 py-2 rounded-xl border border-slate-300 text-sm text-slate-900 focus:outline-none focus:border-teal-700"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                Known Drug / Food Allergies
+              </label>
+              <input
+                type="text"
+                maxLength={300}
+                value={knownAllergies}
+                onChange={(e) => setKnownAllergies(e.target.value)}
+                placeholder="e.g. Penicillin, Sulfa drugs, Ibuprofen (leave blank if none)"
+                className="w-full min-h-[42px] px-3.5 py-2 rounded-xl border border-slate-300 text-sm text-slate-900 focus:outline-none focus:border-teal-700"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Saved Prescription Records in Firestore */}
+        {currentUser && (
+          <div className="pt-4 border-t border-slate-200 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <FileText className="w-4 h-4 text-teal-700" />
+                <h3 className="text-sm font-bold text-slate-900">
+                  Saved Prescription Records ({savedPrescriptions.length})
+                </h3>
+              </div>
+              {loadingPrescriptions && (
+                <span className="text-xs text-slate-500 inline-flex items-center gap-1">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Loading...
+                </span>
+              )}
+            </div>
+
+            {savedPrescriptions.length === 0 ? (
+              <p className="text-xs text-slate-500">
+                No saved prescriptions yet. When you analyze a prescription on the Medicine Schedule page, its essential details (doctor, disease summary, and medicines) are automatically saved here.
+              </p>
+            ) : (
+              <div className="divide-y divide-slate-200 border border-slate-200 rounded-xl overflow-hidden">
+                {savedPrescriptions.map((rec) => (
+                  <div
+                    key={rec.verificationId}
+                    className="p-3.5 bg-white hover:bg-slate-50/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                  >
+                    <div className="space-y-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2 text-xs">
+                        <span className="font-bold text-slate-900">
+                          {rec.doctorName}
+                        </span>
+                        <span className="text-slate-400">·</span>
+                        <span className="font-mono text-slate-600">
+                          {rec.prescriptionDate}
+                        </span>
+                        <span
+                          className={`font-semibold px-2 py-0.5 rounded text-[10px] ${
+                            rec.overallSafetyStatus === 'HIGH_RISK'
+                              ? 'bg-red-50 text-red-700 border border-red-200'
+                              : rec.overallSafetyStatus === 'CAUTION'
+                                ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                          }`}
+                        >
+                          {rec.overallSafetyStatus}
+                        </span>
+                      </div>
+                      {rec.diagnosisSummary && (
+                        <p className="text-xs text-slate-700">
+                          <span className="font-semibold">Condition:</span>{' '}
+                          {rec.diagnosisSummary}
+                        </p>
+                      )}
+                      {rec.medicinesSummary && (
+                        <p className="text-xs text-slate-600 truncate">
+                          <span className="font-semibold">Medicines:</span>{' '}
+                          {rec.medicinesSummary}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-3 self-end sm:self-center shrink-0">
+                      <span className="font-mono text-xs font-bold text-teal-800">
+                        ₹{rec.smartSplitCartTotal.toFixed(0)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleDeleteSavedPrescription(rec.verificationId)
+                        }
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 cursor-pointer"
+                        title="Remove saved record"
+                        aria-label="Remove saved record"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </section>
 
       {/* 2. Language, Spoken Audio & Senior Accessibility */}

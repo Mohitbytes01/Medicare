@@ -31,7 +31,19 @@ service cloud.firestore {
     // 3. Entity Validation Blueprints (Verbatim constraints from firebase-blueprint.json)
     function isValidUserProfile(data) {
       return data.keys().hasAll(['uid', 'name', 'email', 'preferredLanguage', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['uid', 'name', 'email', 'phone', 'preferredLanguage', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'uid',
+          'name',
+          'email',
+          'phone',
+          'age',
+          'chronicDiseases',
+          'knownAllergies',
+          'activeMedicines',
+          'preferredLanguage',
+          'createdAt',
+          'updatedAt'
+        ])
         && data.uid is string
         && data.uid.size() >= 1
         && data.uid.size() <= 128
@@ -44,6 +56,10 @@ service cloud.firestore {
         && data.email.size() >= 3
         && data.email.size() <= 254
         && (!('phone' in data) || (data.phone is string && data.phone.size() <= 32))
+        && (!('age' in data) || (data.age is int && data.age >= 0 && data.age <= 130))
+        && (!('chronicDiseases' in data) || (data.chronicDiseases is string && data.chronicDiseases.size() <= 500))
+        && (!('knownAllergies' in data) || (data.knownAllergies is string && data.knownAllergies.size() <= 300))
+        && (!('activeMedicines' in data) || (data.activeMedicines is string && data.activeMedicines.size() <= 600))
         && data.preferredLanguage is string
         && data.preferredLanguage.size() == 2
         && (data.preferredLanguage == 'en' || data.preferredLanguage == 'bn' || data.preferredLanguage == 'hi')
@@ -69,6 +85,8 @@ service cloud.firestore {
           'patientName',
           'doctorName',
           'prescriptionDate',
+          'diagnosisSummary',
+          'medicinesSummary',
           'overallSafetyStatus',
           'medicineCount',
           'smartSplitCartTotal',
@@ -91,6 +109,8 @@ service cloud.firestore {
         && data.prescriptionDate is string
         && data.prescriptionDate.size() >= 1
         && data.prescriptionDate.size() <= 40
+        && (!('diagnosisSummary' in data) || (data.diagnosisSummary is string && data.diagnosisSummary.size() <= 400))
+        && (!('medicinesSummary' in data) || (data.medicinesSummary is string && data.medicinesSummary.size() <= 600))
         && data.overallSafetyStatus is string
         && data.overallSafetyStatus.size() >= 4
         && data.overallSafetyStatus.size() <= 16
@@ -100,6 +120,67 @@ service cloud.firestore {
         && data.medicineCount <= 50
         && data.smartSplitCartTotal is number
         && data.smartSplitCartTotal >= 0
+        && data.createdAt is timestamp;
+    }
+
+    function isValidSavedOrderSummary(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'orderId',
+          'platformId',
+          'platformName',
+          'itemsSummary',
+          'itemIdsCsv',
+          'itemCount',
+          'totalMrp',
+          'totalPaid',
+          'totalSaved',
+          'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId',
+          'orderId',
+          'platformId',
+          'platformName',
+          'itemsSummary',
+          'itemIdsCsv',
+          'itemCount',
+          'totalMrp',
+          'totalPaid',
+          'totalSaved',
+          'createdAt'
+        ])
+        && data.ownerId is string
+        && data.ownerId.size() >= 1
+        && data.ownerId.size() <= 128
+        && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.ownerId == request.auth.uid
+        && data.orderId is string
+        && data.orderId.size() >= 3
+        && data.orderId.size() <= 64
+        && data.orderId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.platformId is string
+        && data.platformId.size() >= 3
+        && data.platformId.size() <= 16
+        && (data.platformId == '1mg' || data.platformId == 'pharmeasy' || data.platformId == 'netmeds' || data.platformId == 'apollo')
+        && data.platformName is string
+        && data.platformName.size() >= 2
+        && data.platformName.size() <= 40
+        && data.itemsSummary is string
+        && data.itemsSummary.size() >= 1
+        && data.itemsSummary.size() <= 600
+        && data.itemIdsCsv is string
+        && data.itemIdsCsv.size() >= 1
+        && data.itemIdsCsv.size() <= 500
+        && data.itemCount is int
+        && data.itemCount >= 1
+        && data.itemCount <= 100
+        && data.totalMrp is number
+        && data.totalMrp >= 0
+        && data.totalPaid is number
+        && data.totalPaid >= 0
+        && data.totalSaved is number
+        && data.totalSaved >= 0
         && data.createdAt is timestamp;
     }
 
@@ -130,7 +211,16 @@ service cloud.firestore {
         && incoming().email == existing().email
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
-        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'preferredLanguage', 'updatedAt']);
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'name',
+          'phone',
+          'age',
+          'chronicDiseases',
+          'knownAllergies',
+          'activeMedicines',
+          'preferredLanguage',
+          'updatedAt'
+        ]);
 
       allow delete: if false;
     }
@@ -161,6 +251,37 @@ service cloud.firestore {
       allow delete: if isVerifiedUser()
         && isValidId(userId)
         && isValidId(prescriptionId)
+        && request.auth.uid == userId
+        && existing().ownerId == request.auth.uid
+        && exists(/databases/$(database)/documents/users/$(userId)/private/profile);
+    }
+
+    // 6. User Private Past Order Summaries Subcollection (/users/{userId}/orders/{orderId})
+    match /users/{userId}/orders/{orderId} {
+      allow get: if isVerifiedUser()
+        && isValidId(userId)
+        && isValidId(orderId)
+        && request.auth.uid == userId
+        && existing().ownerId == request.auth.uid
+        && exists(/databases/$(database)/documents/users/$(userId)/private/profile);
+
+      allow list: if isVerifiedUser()
+        && request.auth.uid == userId
+        && existing().ownerId == request.auth.uid;
+
+      allow create: if isVerifiedUser()
+        && isValidId(userId)
+        && isValidId(orderId)
+        && request.auth.uid == userId
+        && isValidSavedOrderSummary(incoming())
+        && incoming().createdAt == request.time
+        && exists(/databases/$(database)/documents/users/$(userId)/private/profile);
+
+      allow update: if false;
+
+      allow delete: if isVerifiedUser()
+        && isValidId(userId)
+        && isValidId(orderId)
         && request.auth.uid == userId
         && existing().ownerId == request.auth.uid
         && exists(/databases/$(database)/documents/users/$(userId)/private/profile);

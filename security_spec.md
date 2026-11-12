@@ -3,8 +3,8 @@
 ## 1. Data Invariants
 1. **Default-Deny Global Catch-All**: Every path not explicitly matched is unconditionally denied (`allow read, write: if false;`).
 2. **PII Split-Collection Isolation**: User PII (`email`, `phone`, `name`) is stored strictly inside `/users/{userId}/private/{docId}` where `docId == 'profile'`, and is only readable/writable by the verified owner (`request.auth.uid == userId && request.auth.token.email_verified == true`).
-3. **Strict Schema & Key Validation**: Every `create` and `update` on `UserProfile` and `SavedPrescription` is validated via standalone helper functions (`isValidUserProfile`, `isValidSavedPrescription`) enforcing `hasAll`, `hasOnly`, string length bounds, enum allowlists, and `request.time` server timestamps.
-4. **Relational Parent Sync (Master Gate)**: Creating or reading `/users/{userId}/prescriptions/{prescriptionId}` requires `request.auth.uid == userId` and `exists(/databases/$(database)/documents/users/$(userId)/private/profile)`.
+3. **Strict Schema & Key Validation**: Every `create` and `update` on `UserProfile`, `SavedPrescription`, and `SavedOrderSummary` is validated via standalone helper functions (`isValidUserProfile`, `isValidSavedPrescription`, `isValidSavedOrderSummary`) enforcing `hasAll`, `hasOnly`, string length bounds, enum allowlists, and `request.time` server timestamps.
+4. **Relational Parent Sync (Master Gate)**: Creating, reading, or deleting `/users/{userId}/prescriptions/{prescriptionId}` or `/users/{userId}/orders/{orderId}` requires `request.auth.uid == userId` and `exists(/databases/$(database)/documents/users/$(userId)/private/profile)`.
 
 ## 2. The "Dirty Dozen" Adversarial Payloads
 1. **Unauthenticated Write**: `auth = null` attempting `create` on `/users/u1/private/profile`.

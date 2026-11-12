@@ -30,6 +30,28 @@
           "minLength": 0,
           "maxLength": 32
         },
+        "age": {
+          "type": "integer",
+          "description": "Patient age in years (0 if not specified)."
+        },
+        "chronicDiseases": {
+          "type": "string",
+          "description": "Essential disease details or chronic conditions (e.g. Type 2 Diabetes, Hypertension).",
+          "minLength": 0,
+          "maxLength": 500
+        },
+        "knownAllergies": {
+          "type": "string",
+          "description": "Known medicine or food allergies (e.g. Penicillin, Sulfa, Ibuprofen).",
+          "minLength": 0,
+          "maxLength": 300
+        },
+        "activeMedicines": {
+          "type": "string",
+          "description": "List of ongoing daily medicines and dosages.",
+          "minLength": 0,
+          "maxLength": 600
+        },
         "preferredLanguage": {
           "type": "string",
           "description": "Preferred regional language for dosage instructions.",
@@ -86,6 +108,18 @@
           "minLength": 1,
           "maxLength": 40
         },
+        "diagnosisSummary": {
+          "type": "string",
+          "description": "Disease or diagnosis summary from the prescription.",
+          "minLength": 0,
+          "maxLength": 400
+        },
+        "medicinesSummary": {
+          "type": "string",
+          "description": "Concise comma-separated list of prescribed medicines and dosages.",
+          "minLength": 0,
+          "maxLength": 600
+        },
         "overallSafetyStatus": {
           "type": "string",
           "description": "Overall drug interaction risk status.",
@@ -118,6 +152,86 @@
         "smartSplitCartTotal",
         "createdAt"
       ]
+    },
+    "SavedOrderSummary": {
+      "title": "SavedOrderSummary",
+      "description": "Past basket checkout summary stored under a user's private orders subcollection for easy reordering.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "UID of the user who owns this order summary.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "orderId": {
+          "type": "string",
+          "description": "Unique order summary identifier.",
+          "minLength": 3,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "platformId": {
+          "type": "string",
+          "description": "Target online pharmacy platform identifier.",
+          "enum": ["1mg", "pharmeasy", "netmeds", "apollo"],
+          "minLength": 3,
+          "maxLength": 16
+        },
+        "platformName": {
+          "type": "string",
+          "description": "Display name of the online pharmacy.",
+          "minLength": 2,
+          "maxLength": 40
+        },
+        "itemsSummary": {
+          "type": "string",
+          "description": "Human-readable comma-separated summary of ordered products and quantities.",
+          "minLength": 1,
+          "maxLength": 600
+        },
+        "itemIdsCsv": {
+          "type": "string",
+          "description": "Encoded product IDs and quantities for one-tap basket reordering.",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "itemCount": {
+          "type": "integer",
+          "description": "Total pack count across all items in the order."
+        },
+        "totalMrp": {
+          "type": "number",
+          "description": "Total MRP in INR before pharmacy discount."
+        },
+        "totalPaid": {
+          "type": "number",
+          "description": "Total discounted checkout amount in INR."
+        },
+        "totalSaved": {
+          "type": "number",
+          "description": "Total amount saved in INR compared to MRP."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the checkout summary was recorded."
+        }
+      },
+      "required": [
+        "ownerId",
+        "orderId",
+        "platformId",
+        "platformName",
+        "itemsSummary",
+        "itemIdsCsv",
+        "itemCount",
+        "totalMrp",
+        "totalPaid",
+        "totalSaved",
+        "createdAt"
+      ]
     }
   },
   "firestore": {
@@ -132,6 +246,12 @@
         "$ref": "#/entities/SavedPrescription"
       },
       "description": "User's private saved prescription verification records."
+    },
+    "/users/{userId}/orders/{orderId}": {
+      "schema": {
+        "$ref": "#/entities/SavedOrderSummary"
+      },
+      "description": "User's private past basket checkout summaries for reordering healthcare essentials."
     }
   }
 }

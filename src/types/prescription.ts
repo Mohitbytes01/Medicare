@@ -20,6 +20,8 @@ export interface PharmacyQuote {
   stockStatus: 'In Stock' | 'Express 2hr' | 'Limited Stock';
   isLowestPrice: boolean;
   deepLink: string;
+  isLiveGrounded?: boolean;
+  lastLiveSync?: string | null;
 }
 
 export interface ExtractedMedicine {
@@ -103,7 +105,24 @@ export interface AuthUser {
   name: string;
   identifier: string; // email or phone number
   phone: string;
+  age?: number;
+  chronicDiseases?: string;
+  knownAllergies?: string;
+  activeMedicines?: string;
   preferredLanguage: SupportedLanguage;
+  createdAt: string;
+}
+
+export interface SavedPrescriptionRecord {
+  verificationId: string;
+  patientName: string;
+  doctorName: string;
+  prescriptionDate: string;
+  diagnosisSummary: string;
+  medicinesSummary: string;
+  overallSafetyStatus: RiskSeverity;
+  medicineCount: number;
+  smartSplitCartTotal: number;
   createdAt: string;
 }
 
@@ -145,5 +164,59 @@ export interface CareCircleActivityEvent {
   type: 'DOSE_TAKEN' | 'MISSED_ALERT' | 'CHECK_IN_SENT' | 'PRESCRIPTION_ASSIGNED';
   message: string;
 }
+
+export type MedicineCategoryId =
+  | 'all'
+  | 'personal_hygiene'
+  | 'antiseptic_skin'
+  | 'diabetes'
+  | 'cardiac'
+  | 'acidity'
+  | 'fever_pain'
+  | 'vitamins'
+  | 'thyroid'
+  | 'antibiotics';
+
+export interface StoreMedicineItem {
+  id: string;
+  name: string;
+  imageUrl?: string;
+  manufacturer: string;
+  genericComposition: string;
+  category: Exclude<MedicineCategoryId, 'all'>;
+  categoryLabel: string;
+  packSize: string;
+  dosage: string;
+  frequency: string;
+  timing: TimeSlot[];
+  mealRelation: string;
+  purpose: string;
+  prescriptionRequired: boolean;
+  substituteBrand: string;
+  substituteManufacturer: string;
+  substitutePrice: number;
+  mrp: number;
+  janAushadhiGenericPrice: number;
+  lowestPrice: number;
+  lowestPlatformName: string;
+  lowestDeepLink: string;
+  maxSavingsPercent: number;
+  instructions: TrilingualText;
+  pharmacyQuotes: PharmacyQuote[];
+}
+
+export interface SavedOrderSummaryRecord {
+  orderId: string;
+  platformId: '1mg' | 'pharmeasy' | 'netmeds' | 'apollo';
+  platformName: string;
+  itemsSummary: string;
+  itemIdsCsv: string;
+  itemCount: number;
+  totalMrp: number;
+  totalPaid: number;
+  totalSaved: number;
+  createdAt: string;
+}
+
 
 

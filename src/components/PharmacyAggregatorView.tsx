@@ -29,6 +29,7 @@ function cleanMedicineQueryName(rawName: string): string {
       /^(?:tab(?:let)?s?|cap(?:sule)?s?|syp|syrup|inj(?:ection)?|oint(?:ment)?|drops?|gel|cream)\.?\s+/i,
       ''
     )
+    .replace(/\b(?:pack of|strip of|\d+\s*tablets?|\d+\s*capsules?|\d+['’]?s)\b/gi, '')
     .replace(/[^a-zA-Z0-9\s-]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -66,7 +67,7 @@ const PLATFORMS: Array<{
     name: 'Netmeds',
     deliveryNote: 'Pan-India courier delivery',
     homeUrl: 'https://www.netmeds.com',
-    prescriptionUploadUrl: 'https://www.netmeds.com/prescriptions',
+    prescriptionUploadUrl: 'https://www.netmeds.com',
     buildSingleMedUrl: (name) =>
       `https://www.netmeds.com/products?q=${encodeURIComponent(cleanMedicineQueryName(name))}`,
   },
@@ -76,8 +77,16 @@ const PLATFORMS: Array<{
     deliveryNote: 'Express 2-hour local pharmacy delivery',
     homeUrl: 'https://www.apollopharmacy.in',
     prescriptionUploadUrl: 'https://www.apollopharmacy.in/upload-prescription',
-    buildSingleMedUrl: (name) =>
-      `https://www.apollopharmacy.in/search-medicines/${encodeURIComponent(cleanMedicineQueryName(name))}`,
+    buildSingleMedUrl: (name) => {
+      const clean = cleanMedicineQueryName(name);
+      const slug = clean
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+      return slug
+        ? `https://www.apollopharmacy.in/search-medicines/${slug}`
+        : `https://www.apollo247.com/specialties/search?q=${encodeURIComponent(clean)}`;
+    },
   },
 ];
 
@@ -170,9 +179,11 @@ export const PharmacyAggregatorView: React.FC<PharmacyAggregatorViewProps> = ({
     const savedPercent =
       totalMrp > 0 ? Math.round((totalSaved / totalMrp) * 100) : 0;
 
-    // Primary external checkout URL opens the first medicine directly on the live pharmacy site
+    // Direct live pharmacy store URL for ordering
     const primaryCheckoutUrl =
-      items.length > 0 ? items[0].deepLink : platform.homeUrl;
+      items.length > 0
+        ? platform.buildSingleMedUrl(items[0].cleanQuery)
+        : platform.homeUrl;
 
     return {
       ...platform,

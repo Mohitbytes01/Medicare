@@ -1,6 +1,6 @@
 {
   "name": "VeriMed",
-  "description": "Multimodal prescription verifier, drug interaction safety auditor, trilingual dosage translator (English, Bengali, Hindi), and real-time Indian online pharmacy price aggregator.",
+  "description": "Compare live medicine prices across Tata 1mg, PharmEasy, Netmeds, Apollo 24|7 & Jan Aushadhi generics, shop healthcare essentials, and scan prescriptions in English, Bengali & Hindi.",
   "requestFramePermissions": ["camera"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

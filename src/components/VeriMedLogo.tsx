@@ -77,11 +77,13 @@ export const VeriMedLogo: React.FC<VeriMedLogoProps> = ({
   }
 
   return (
-    <div className={`inline-flex items-center gap-2.5 ${className}`}>
+    <div className={`inline-flex items-center ${size === 'sm' ? 'gap-1.5' : 'gap-2.5'} ${className}`}>
       {shieldMark}
       <div className={`${textSizeClasses} leading-none tracking-tight whitespace-nowrap`}>
         <span className="font-extrabold text-[#1558BC]">VeriMed</span>{' '}
-        <span className="font-normal text-[#475467] tracking-wide">HEALTH</span>
+        <span className={`font-normal text-[#475467] tracking-wide ${size === 'sm' ? 'hidden sm:inline' : ''}`}>
+          HEALTH
+        </span>
       </div>
     </div>
   );
